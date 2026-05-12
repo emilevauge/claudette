@@ -3,14 +3,14 @@ import AppKit
 
 @main
 struct ClaudetteApp: App {
-    // Garde une ref vers le controller pour que SwiftUI ne le libère pas.
-    // L'initialisation de `AppDelegate.shared` enregistre l'observer
+    // Keep a strong ref to the controller so SwiftUI doesn't release it.
+    // Initializing `AppDelegate.shared` registers the observer for
     // `NSApplication.didFinishLaunchingNotification`.
     @StateObject private var delegate = AppDelegate.shared
 
     init() {
-        // Mode utilitaire CLI : rend l'icône d'app en PNG puis exit.
-        // Utilisé par make-app.sh pour produire le .icns du bundle.
+        // CLI utility mode: render the app icon as a PNG then exit.
+        // Used by make-app.sh to produce the bundle's .icns.
         let args = CommandLine.arguments
         if let idx = args.firstIndex(of: "--generate-icon"),
            idx + 1 < args.count {
@@ -21,11 +21,12 @@ struct ClaudetteApp: App {
     }
 
     var body: some Scene {
-        // SwiftUI a besoin d'au moins une scène. On utilise la Settings scene,
-        // qui n'est visible qu'à l'ouverture explicite de "Réglages…".
+        // SwiftUI requires at least one scene. The Settings scene is hidden
+        // until the user explicitly opens "Settings…".
         Settings {
             SettingsView()
                 .onDisappear {
+                    // Back to accessory to hide the Dock icon.
                     NSApp.setActivationPolicy(.accessory)
                 }
         }

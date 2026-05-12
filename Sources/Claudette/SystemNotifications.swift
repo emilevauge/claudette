@@ -2,23 +2,24 @@ import Foundation
 import AppKit
 import UserNotifications
 
-/// Notifications système natives via UNUserNotificationCenter.
-/// Le système gère présentation, durée, son, centre de notifications, clic.
+/// Native system notifications through UNUserNotificationCenter. The system
+/// owns presentation, duration, sound, the Notification Center and click
+/// handling.
 @MainActor
 final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     static let shared = SystemNotifications()
 
-    /// Callback exécuté quand l'utilisateur clique sur une notif Claudette.
+    /// Callback fired when the user clicks a session notification.
     var onClick: ((ClaudeSession) -> Void)?
 
-    /// Tableau d'index pour retrouver la ClaudeSession à partir du sessionId
-    /// stocké dans `userInfo` (UserNotifications ne sérialise pas nos objets).
+    /// Index used to recover the ClaudeSession from the `sessionId` stored
+    /// in `userInfo` (UserNotifications doesn't serialize our objects).
     private var pending: [String: ClaudeSession] = [:]
 
-    /// `UNUserNotificationCenter` exige que Bundle.main ait un CFBundleIdentifier.
-    /// Sans ça (cas du binaire SPM lancé directement, pas dans un .app), tout
-    /// appel crash. On désactive proprement les notifs dans ce cas.
+    /// `UNUserNotificationCenter` requires Bundle.main to have a
+    /// CFBundleIdentifier. Without it (SPM binary launched directly, not in a
+    /// .app), every call crashes. We disable notifications cleanly in that case.
     private let available: Bool = (Bundle.main.bundleIdentifier != nil)
 
     private override init() {
@@ -28,21 +29,61 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// Demande la permission standard : au premier lancement macOS affiche
-    /// le dialogue « Claudette souhaite envoyer des notifications ». Sans
-    /// `.provisional`, on récupère le comportement banner normal.
+    /// Request the standard permission. On first launch macOS shows the
+    /// "Claudette would like to send you notifications" dialog. Without
+    /// `.provisional` we get the regular banner behaviour.
     func requestPermission() {
         guard available else { return }
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound]
-        ) { _, _ in /* ignoré */ }
+        ) { _, _ in /* ignored */ }
     }
 
-    /// Envoie une notif système pour une session passée en attente.
-    /// Si Claudette est lancée comme un vrai .app (avec bundle ID), utilise
-    /// `UNUserNotificationCenter` (clic interactif). Sinon (binaire SPM nu en dev),
-    /// fallback sur `display notification` via AppleScript (pas de clic mais
-    /// le visuel est identique côté macOS).
+    /// Send an "update available" notification. Clicking it opens the GitHub
+    /// release page in the user's default browser.
+    func notifyUpdateAvailable(version: String, url: URL) {
+        let content = UNMutableNotificationContent()
+        content.title = L("Update available")
+        content.body = L("Claudette \(version) is available. Click to open the release.")
+        content.sound = .default
+        content.userInfo = ["openURL": url.absoluteString]
+
+        guard available else {
+            notifyUpdateViaAppleScript(version: version, url: url)
+            return
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "claudette.update.\(version)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            if error != nil {
+                Task { @MainActor in
+                    self?.notifyUpdateViaAppleScript(version: version, url: url)
+                }
+            }
+        }
+    }
+
+    private func notifyUpdateViaAppleScript(version: String, url: URL) {
+        let title = escape(L("Update available"))
+        let body = escape(L("Claudette \(version) is available."))
+        let source = """
+        display notification "\(body)" with title "\(title)" sound name "Glass"
+        """
+        var error: NSDictionary?
+        NSAppleScript(source: source)?.executeAndReturnError(&error)
+        // AppleScript "display notification" cannot embed a clickable URL;
+        // the user opens the release page manually.
+    }
+
+    /// Send a system notification when a session transitions to idle.
+    /// If Claudette runs as a proper .app (with bundle ID), use
+    /// `UNUserNotificationCenter` (clickable). Otherwise (raw SPM binary in
+    /// dev), fall back to AppleScript `display notification` (no click but
+    /// visually identical to a real macOS notification).
     func notifyIdle(_ session: ClaudeSession, lastText: String?) {
         guard available else {
             notifyViaAppleScript(session, lastText: lastText)
@@ -59,7 +100,7 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         content.userInfo = ["sessionId": session.id]
 
-        // Mémorise la session pour le callback de clic.
+        // Remember the session so we can dispatch the click callback.
         pending[session.id] = session
 
         let request = UNNotificationRequest(
@@ -68,8 +109,8 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request) { [weak self] error in
-            // Si UN refuse (permission denied, bundle non enregistré…), fallback
-            // sur AppleScript pour que l'utilisateur voie quand même une notif.
+            // If UN fails (denied, bundle not registered…), fall back to
+            // AppleScript so the user still sees a notification.
             if error != nil {
                 Task { @MainActor in
                     self?.notifyViaAppleScript(session, lastText: lastText)
@@ -80,7 +121,7 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: UNUserNotificationCenterDelegate
 
-    /// Permet à la notif d'apparaitre même si Claudette a (théoriquement) le focus.
+    /// Show the notification even while Claudette has (theoretically) focus.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -89,14 +130,17 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound, .list])
     }
 
-    /// Clic ou action sur la notif : on focus la fenêtre Ghostty.
+    /// Click or action on the notification: focus the Ghostty window.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        if let id = info["sessionId"] as? String {
+        if let urlString = info["openURL"] as? String, let url = URL(string: urlString) {
+            // "Update available" notification: open the release page.
+            Task { @MainActor in NSWorkspace.shared.open(url) }
+        } else if let id = info["sessionId"] as? String {
             Task { @MainActor in
                 if let session = self.pending[id] {
                     self.onClick?(session)
@@ -107,11 +151,11 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 
-    // MARK: fallback AppleScript
+    // MARK: AppleScript fallback
 
-    /// Affiche une notif via `display notification` (osascript), pour les
-    /// cas où l'app n'a pas de bundle ID (binaire SPM lancé directement en dev).
-    /// Pas de callback de clic, mais visuel identique à une vraie notif macOS.
+    /// Show a notification via AppleScript `display notification`, for cases
+    /// where the app has no bundle ID (SPM binary launched directly in dev).
+    /// No click callback, but the visual is identical to a real macOS notification.
     private func notifyViaAppleScript(_ session: ClaudeSession, lastText: String?) {
         let title = escape(session.displayName)
         let subtitle = escape(prettyPath(session.cwd))

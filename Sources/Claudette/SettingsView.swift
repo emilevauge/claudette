@@ -75,7 +75,7 @@ struct SettingsView: View {
                                 try LaunchAgent.disable()
                             }
                         } catch {
-                            // En cas d'échec, on revient à l'état réel sur disque.
+                            // On failure, revert to the actual on-disk state.
                             launchAtLogin = LaunchAgent.isEnabled
                         }
                     }

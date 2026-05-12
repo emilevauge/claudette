@@ -3,21 +3,21 @@ import Combine
 import Darwin
 import AppKit
 
-/// Surveille `~/.claude/sessions/*.json` et publie les sessions dont le PID est vivant.
+/// Watches `~/.claude/sessions/*.json` and publishes sessions whose PID is alive.
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [ClaudeSession] = []
 
-    /// Appelé chaque fois qu'une session passe de busy à non-busy.
+    /// Called every time a session transitions from busy to non-busy.
     var onSessionBecameIdle: ((ClaudeSession) -> Void)?
 
     private var timer: Timer?
     private let sessionsDir: String
     private let pollInterval: TimeInterval
 
-    /// Sessions qui étaient busy au refresh précédent (par id).
+    /// Sessions that were busy at the previous refresh (by id).
     private var previousBusy: Set<String> = []
-    /// Premier refresh : on n'émet pas de transitions à froid.
+    /// First refresh: don't emit transitions on cold start.
     private var hasBootstrapped = false
 
     init(pollInterval: TimeInterval = 2.0) {
@@ -56,20 +56,20 @@ final class SessionStore: ObservableObject {
             alive.append(session)
         }
 
-        // Annoter avec le terminal Ghostty correspondant : son titre reflète
-        // l'état réel de Claude (spinner Braille / ✳) en temps réel.
+        // Annotate with the matching Ghostty terminal: its title reflects the
+        // real state of Claude (Braille spinner / ✳) in real time.
         let terminals = ghosttyIsRunning() ? GhosttyBridge.listTerminals() : []
         if !terminals.isEmpty {
             alive = alive.map { Self.annotate($0, with: terminals) }
         }
 
-        // Tri : busy d'abord, puis les plus récents.
+        // Sort: busy first, then most recently updated.
         alive.sort { a, b in
             if a.isBusy != b.isBusy { return a.isBusy }
             return a.updatedAt > b.updatedAt
         }
 
-        // Détection des transitions busy → non busy.
+        // Detect busy → non-busy transitions.
         let currentBusy = Set(alive.filter { $0.isBusy }.map { $0.id })
         if hasBootstrapped {
             for s in alive where !s.isBusy && previousBusy.contains(s.id) {
@@ -87,14 +87,15 @@ final class SessionStore: ObservableObject {
             .contains(where: { $0.bundleIdentifier == "com.mitchellh.ghostty" })
     }
 
-    /// Cherche le terminal Ghostty correspondant à la session.
-    /// 1) match par cwd normalisé
-    /// 2) si plusieurs candidats, préférer ceux dont le titre commence par
-    ///    un spinner Braille (busy) ou `✳` (idle) : c'est un terminal Claude,
-    ///    pas un shell ordinaire ouvert dans le même dossier.
-    /// 3) parmi les candidats restants, préférer celui dont le titre contient
-    ///    le `name` de la session.
-    /// 4) si aucun match cwd, fallback : titre contenant le name.
+    /// Find the Ghostty terminal matching a session.
+    /// 1) match by normalized cwd
+    /// 2) if several candidates, prefer those whose title starts with a Braille
+    ///    spinner (busy) or `✳` (idle): that's a Claude terminal, not a plain
+    ///    shell that happens to share the same directory.
+    /// 3) among the remaining candidates, prefer the one whose title contains
+    ///    the session `name`.
+    /// 4) if no cwd match at all, last resort: any terminal whose title
+    ///    contains the session name AND looks like a Claude terminal.
     private static func annotate(
         _ session: ClaudeSession,
         with terminals: [GhosttyBridge.GhosttyTerminal]
@@ -103,7 +104,7 @@ final class SessionStore: ObservableObject {
         let sessionCwd = normalize(session.cwd)
 
         let byCwd = terminals.filter { normalize($0.cwd) == sessionCwd }
-        // Étape 2 : filtre Claude-only quand on a le choix.
+        // Step 2: keep only Claude terminals when we have the choice.
         let claudeCandidates = byCwd.filter(isClaudeTerminal)
         let pool = claudeCandidates.isEmpty ? byCwd : claudeCandidates
 
@@ -124,9 +125,9 @@ final class SessionStore: ObservableObject {
         URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
-    /// Un terminal Ghostty exécute Claude Code si son titre commence par un
-    /// caractère Braille (spinner busy) ou `✳` (idle). Les shells ordinaires
-    /// affichent typiquement `user@host:path` qui ne matche pas.
+    /// A Ghostty terminal runs Claude Code when its title starts with a Braille
+    /// character (busy spinner) or `✳` (idle). Plain shells display something
+    /// like `user@host:path` which fails this check.
     private static func isClaudeTerminal(_ t: GhosttyBridge.GhosttyTerminal) -> Bool {
         let trimmed = t.name.trimmingCharacters(in: .whitespaces)
         guard let first = trimmed.unicodeScalars.first else { return false }
@@ -157,7 +158,8 @@ final class SessionStore: ObservableObject {
         )
     }
 
-    /// `kill(pid, 0)` ne tue rien : il vérifie juste que le process existe et est accessible.
+    /// `kill(pid, 0)` doesn't kill anything: it only checks that the process
+    /// exists and is reachable by the current user.
     private static func isAlive(pid: Int32) -> Bool {
         return kill(pid, 0) == 0
     }

@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// Icône de l'application, dessinée en SwiftUI pour rester cohérente avec
-/// l'icône de la notif (même glyphe terminal, même gradient sand/brown).
+/// The app icon, drawn in SwiftUI so it stays consistent with the notification
+/// icon (same terminal glyph, same sand/brown gradient).
 struct AppIconView: View {
     var body: some View {
         ZStack {
@@ -25,8 +25,8 @@ struct AppIconView: View {
 }
 
 enum AppIcon {
-    /// Rend l'icône d'app en NSImage et l'affecte au process en cours.
-    /// Visible dans Notification Center, Cmd+Tab, Spotlight, etc.
+    /// Render the app icon as an NSImage and assign it to the running process.
+    /// Visible in Notification Center, Cmd+Tab, Spotlight, etc.
     @MainActor
     static func install() {
         if let img = renderNSImage() {
@@ -34,8 +34,8 @@ enum AppIcon {
         }
     }
 
-    /// Rend l'icône d'app à 1024×1024 et l'enregistre en PNG.
-    /// Utilisé par `make-app.sh` pour générer le .icns du bundle.
+    /// Render the app icon at 1024×1024 and save it as a PNG.
+    /// Used by `make-app.sh` to generate the bundle's .icns.
     @MainActor
     static func writePNG(to path: String) -> Bool {
         guard let img = renderNSImage(),

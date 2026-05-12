@@ -1,10 +1,10 @@
 import Foundation
 
-/// Gère le lancement automatique de Claudette à la connexion utilisateur via
-/// un LaunchAgent user (~/Library/LaunchAgents/<label>.plist).
+/// Manages "launch Claudette at login" via a user LaunchAgent
+/// (`~/Library/LaunchAgents/<label>.plist`).
 ///
-/// Cette approche fonctionne avec un binaire SPM nu (pas besoin de packager
-/// en .app). `SMAppService.mainApp` aurait exigé un bundle .app signé.
+/// This approach works with a raw SPM binary (no .app bundle required).
+/// `SMAppService.mainApp` would have required a signed .app bundle.
 enum LaunchAgent {
 
     static let label = "dev.claudette.app"
@@ -16,17 +16,17 @@ enum LaunchAgent {
             .appendingPathComponent("\(label).plist")
     }
 
-    /// Chemin absolu du binaire Claudette en cours d'exécution.
+    /// Absolute path of the currently running Claudette executable.
     private static var executablePath: String {
         Bundle.main.executablePath ?? CommandLine.arguments[0]
     }
 
-    /// Indique si le LaunchAgent est installé.
+    /// Whether the LaunchAgent is installed.
     static var isEnabled: Bool {
         FileManager.default.fileExists(atPath: plistURL.path)
     }
 
-    /// Active le lancement au démarrage : écrit le plist + le charge dans launchd.
+    /// Enable launch at login: write the plist and load it in launchd.
     static func enable() throws {
         let dir = plistURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -45,11 +45,11 @@ enum LaunchAgent {
         )
         try data.write(to: plistURL, options: .atomic)
 
-        // Charge dans launchd. Si déjà chargé, on ignore l'erreur.
+        // Load into launchd. Ignore failure if it's already loaded.
         _ = run("/bin/launchctl", ["load", "-w", plistURL.path])
     }
 
-    /// Désactive le lancement au démarrage : décharge + supprime le plist.
+    /// Disable launch at login: unload from launchd and delete the plist.
     static func disable() throws {
         if FileManager.default.fileExists(atPath: plistURL.path) {
             _ = run("/bin/launchctl", ["unload", "-w", plistURL.path])

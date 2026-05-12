@@ -10,7 +10,7 @@ struct MenuView: View {
     @State private var selectedIndex: Int = 0
     @FocusState private var searchFocused: Bool
 
-    /// Hauteur max de la liste, persistée entre lancements (configurée dans Réglages).
+    /// List max height, persisted across launches (configured in Settings).
     @AppStorage("listMaxHeight") private var listMaxHeight: Double = 380
 
     var body: some View {
@@ -202,9 +202,9 @@ struct MenuView: View {
     }
 
     private func focus(_ session: ClaudeSession) {
-        // Fermer le popover en premier : NSPopover.transient se ferme tout seul
-        // dès que Ghostty prend le focus, et si on le ferme manuellement après,
-        // ça peut interrompre la chaîne d'activation côté AppleScript.
+        // Close the popover first: NSPopover.transient closes on its own as
+        // soon as Ghostty takes focus, and closing it manually afterwards can
+        // interrupt the AppleScript activation chain.
         AppDelegate.shared.closePopover()
         _ = GhosttyBridge.focus(session: session)
     }
@@ -281,9 +281,9 @@ private struct SessionRow: View {
             Image(systemName: "circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(color)
-                // SymbolEffect natif macOS 14 : Core Animation, pas de
-                // re-render SwiftUI à chaque frame contrairement à un
-                // ViewModifier scaleEffect+opacity custom.
+                // Native macOS 14 SymbolEffect: Core Animation, no SwiftUI
+                // re-render on every frame unlike a custom scaleEffect+opacity
+                // ViewModifier.
                 .symbolEffect(.pulse, options: .repeating, isActive: session.isBusy)
         }
     }
@@ -312,14 +312,14 @@ private struct SessionRow: View {
         return path
     }
 
-    /// Durée écoulée depuis le démarrage de la session : "2 j 3 h", "1 h 23 min", "12 min".
+    /// Elapsed time since the session started: "2d 3h", "1h 23m", "12m".
     private func sessionDuration(_ start: Date) -> String {
         let interval = max(0, Date().timeIntervalSince(start))
         return Self.durationFormatter.string(from: interval) ?? ""
     }
 
-    /// Formatter caché en statique (sa création est coûteuse, on évite de
-    /// l'instancier à chaque body re-render pendant le scroll).
+    /// Cached as a static (instantiating one is costly; this avoids creating
+    /// a new formatter on every body re-render while scrolling).
     private static let durationFormatter: DateComponentsFormatter = {
         let f = DateComponentsFormatter()
         f.allowedUnits = [.day, .hour, .minute]

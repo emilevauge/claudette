@@ -17,6 +17,9 @@
 "Total session duration" = "Duración total de la sesión";
 "Since last activity" = "Desde la última actividad";
 "now" = "ahora";
+"Update available" = "Actualización disponible";
+"Claudette %@ is available. Click to open the release." = "Claudette %@ está disponible. Pulsa para abrir la versión.";
+"Claudette %@ is available." = "Claudette %@ está disponible.";
 "Test notification" = "Probar notificación";
 "Preview" = "Vista previa";
 "Show a sample notification to preview the design." = "Muestra una notificación de ejemplo para previsualizar el diseño.";

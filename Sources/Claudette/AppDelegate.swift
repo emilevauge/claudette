@@ -3,9 +3,10 @@ import SwiftUI
 import Combine
 import KeyboardShortcuts
 
-/// Controller singleton de l'app : NSStatusItem + NSPopover AppKit purs.
-/// On abandonne `MenuBarExtra` SwiftUI pour pouvoir ouvrir/fermer le popover
-/// programmatiquement de manière fiable depuis le hotkey global.
+/// Singleton controller of the app: native NSStatusItem + NSPopover.
+/// We don't use SwiftUI `MenuBarExtra` because we need to open and close the
+/// popover programmatically (global keyboard shortcut) and the AppKit API
+/// gives us full control.
 @MainActor
 final class AppDelegate: NSObject, ObservableObject {
 
@@ -30,7 +31,7 @@ final class AppDelegate: NSObject, ObservableObject {
     @objc private func didFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // Icône d'app cohérente avec la barre de menus et les notifs.
+        // App icon consistent with the menu bar and notifications.
         AppIcon.install()
 
         store.start()
@@ -47,6 +48,9 @@ final class AppDelegate: NSObject, ObservableObject {
         setupPopover()
         observeSessions()
         setupHotkey()
+
+        // Background check for a newer release on GitHub.
+        UpdateChecker.checkInBackground()
     }
 
     // MARK: status item
@@ -64,7 +68,7 @@ final class AppDelegate: NSObject, ObservableObject {
 
     private func setupPopover() {
         let p = NSPopover()
-        p.behavior = .transient        // se ferme au clic hors du popover
+        p.behavior = .transient        // dismisses on click outside
         p.animates = true
         p.contentSize = NSSize(width: 380, height: 480)
         p.contentViewController = NSHostingController(
@@ -74,7 +78,7 @@ final class AppDelegate: NSObject, ObservableObject {
     }
 
     private func observeSessions() {
-        // Bascule l'icône selon qu'au moins une session est busy.
+        // Switch the menu bar icon depending on whether any session is busy.
         store.$sessions
             .map { $0.contains(where: { $0.isBusy }) }
             .removeDuplicates()
@@ -104,7 +108,7 @@ final class AppDelegate: NSObject, ObservableObject {
         } else {
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // S'assure que le contenu (TextField) puisse prendre le focus.
+            // Ensure the content (TextField) can take focus.
             popover.contentViewController?.view.window?.makeKey()
         }
     }

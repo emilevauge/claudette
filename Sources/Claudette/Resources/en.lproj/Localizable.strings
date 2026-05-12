@@ -17,6 +17,9 @@
 "Total session duration" = "Total session duration";
 "Since last activity" = "Since last activity";
 "now" = "now";
+"Update available" = "Update available";
+"Claudette %@ is available. Click to open the release." = "Claudette %@ is available. Click to open the release.";
+"Claudette %@ is available." = "Claudette %@ is available.";
 "Test notification" = "Test notification";
 "Preview" = "Preview";
 "Show a sample notification to preview the design." = "Show a sample notification to preview the design.";

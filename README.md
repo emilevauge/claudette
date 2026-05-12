@@ -6,6 +6,19 @@ A macOS menu bar app that lists every running Claude Code session and lets you j
   <img src="docs/screenshot.png" width="480" alt="Claudette popover showing live Claude Code sessions"/>
 </p>
 
+## Download
+
+Grab the latest signed `.app` from the [releases page](https://github.com/emilevauge/claudette/releases/latest).
+
+```sh
+curl -L -o Claudette.app.zip \
+  https://github.com/emilevauge/claudette/releases/latest/download/Claudette.app.zip
+unzip Claudette.app.zip
+mv Claudette.app /Applications/
+xattr -dr com.apple.quarantine /Applications/Claudette.app   # ad-hoc signed, bypass Gatekeeper
+open /Applications/Claudette.app
+```
+
 ## Features
 
 - **Live session list** : reads `~/.claude/sessions/*.json` every 2 s and keeps only sessions whose PID is still alive (`kill(pid, 0)`).
