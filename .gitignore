@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+Package.resolved
+DerivedData/
+*.xcodeproj
+Claudette.app/
+.DS_Store
