@@ -32,3 +32,6 @@
 "Could not reach github.com" = "github.com inalcanzable";
 "List height" = "Altura de la lista";
 "Maximum height of the session list in the menu bar popover." = "Altura máxima de la lista de sesiones en la ventana de la barra de menús.";
+"License" = "Licencia";
+"Source" = "Código fuente";
+"© 2026 Emile Vauge. Released under the MIT License." = "© 2026 Emile Vauge. Publicado bajo la licencia MIT.";

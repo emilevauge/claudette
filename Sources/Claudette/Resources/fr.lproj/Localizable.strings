@@ -32,3 +32,6 @@
 "Could not reach github.com" = "github.com inaccessible";
 "List height" = "Hauteur de la liste";
 "Maximum height of the session list in the menu bar popover." = "Hauteur maximale de la liste des sessions dans la fenêtre de la barre de menus.";
+"License" = "Licence";
+"Source" = "Source";
+"© 2026 Emile Vauge. Released under the MIT License." = "© 2026 Emile Vauge. Publié sous licence MIT.";

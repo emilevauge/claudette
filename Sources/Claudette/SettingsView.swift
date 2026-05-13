@@ -23,8 +23,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            aboutSection
-
             Section {
                 Toggle(L("Launch at login"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
@@ -46,11 +44,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // Always last: identity, version & legal info live at the bottom.
+            aboutSection
         }
         .formStyle(.grouped)
         .frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
     }
+
+    private static let repoURL = URL(string: "https://github.com/emilevauge/claudette")!
 
     // MARK: about
 
@@ -96,6 +99,27 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            // Legal & source. Repo link uses Link so it gets the standard
+            // hover/visited treatment and respects the user's default browser.
+            HStack {
+                Text(L("License"))
+                Spacer()
+                Text("MIT")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Text(L("Source"))
+                Spacer()
+                Link("github.com/emilevauge/claudette", destination: Self.repoURL)
+                    .font(.callout)
+            }
+
+            Text(L("© 2026 Emile Vauge. Released under the MIT License."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } header: {
             Text(L("About"))
         }

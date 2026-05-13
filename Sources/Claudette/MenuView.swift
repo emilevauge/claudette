@@ -297,9 +297,10 @@ private struct SessionRow: View {
             Image(systemName: "circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(color)
-                // Pulse in every active phase. Core Animation under the hood,
-                // not a SwiftUI re,render per frame.
-                .symbolEffect(.pulse, options: .repeating, isActive: true)
+                // Pulse only when something is actually happening (busy or
+                // needs,attention). Idle sessions get a static dot, otherwise
+                // every row blinks for no reason and pulls the eye.
+                .symbolEffect(.pulse, options: .repeating, isActive: session.phase != .idle)
         }
     }
 
@@ -361,15 +362,22 @@ private struct SessionRow: View {
     /// Thin context,fill bar shown at the bottom of each row. Color
     /// shifts green → yellow → orange → red as the model's context window
     /// fills up. Tooltip surfaces the exact percentage.
+    ///
+    /// The empty rail is always rendered (even at 0%) so a freshly,started
+    /// session still shows a visible bar; the colored fill collapses to
+    /// zero width when `fraction == 0` instead of clamping to 2pt, otherwise
+    /// 0% would look identical to 1%.
     @ViewBuilder
     private func contextBar(fraction: Double) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(.tertiary.opacity(0.25))
-                Capsule()
-                    .fill(Self.contextColor(for: fraction))
-                    .frame(width: max(2, geo.size.width * fraction))
+                    .fill(.secondary.opacity(0.35))
+                if fraction > 0 {
+                    Capsule()
+                        .fill(Self.contextColor(for: fraction))
+                        .frame(width: max(2, geo.size.width * fraction))
+                }
             }
         }
         .frame(height: 3.5)
