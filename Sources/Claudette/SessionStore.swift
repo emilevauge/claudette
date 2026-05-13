@@ -54,13 +54,6 @@ final class SessionStore: ObservableObject {
                 continue
             }
             session.aiTitle = ConversationReader.aiTitle(for: session)
-            // Resolve the refined idle kind only when we'll actually use
-            // it (not busy), to avoid re,reading the JSONL on every tick
-            // for sessions that are visibly busy via the Ghostty title.
-            // The title comes from `annotate(...)` later, so for now
-            // compute idleKind unconditionally; it's cheap with the
-            // tail,read.
-            session.idleKind = ConversationReader.idleKind(for: session)
             alive.append(session)
         }
 
@@ -77,10 +70,11 @@ final class SessionStore: ObservableObject {
             return a.updatedAt > b.updatedAt
         }
 
-        // Detect busy → non-busy transitions.
-        let currentBusy = Set(alive.filter { $0.isBusy }.map { $0.id })
+        // Detect busy → non-busy transitions (covers both .idle and
+        // .needsAttention as "Claude wants you").
+        let currentBusy = Set(alive.filter { $0.phase == .busy }.map { $0.id })
         if hasBootstrapped {
-            for s in alive where !s.isBusy && previousBusy.contains(s.id) {
+            for s in alive where s.phase != .busy && previousBusy.contains(s.id) {
                 onSessionBecameIdle?(s)
             }
         }

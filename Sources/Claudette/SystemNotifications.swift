@@ -38,6 +38,23 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// How long an "idle" notification stays in Notification Center
+    /// before being silently removed. Banner duration on screen is
+    /// controlled by the user's macOS preferences (Banners vs Alerts);
+    /// this only affects the historical entry.
+    private static let idleAutoRemoveDelay: TimeInterval = 30
+
+    /// Schedule a one,shot removal of `id` from Notification Center after
+    /// `idleAutoRemoveDelay` seconds.
+    private func scheduleAutoRemove(id: String) {
+        let delay = Self.idleAutoRemoveDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(
+                withIdentifiers: [id]
+            )
+        }
+    }
+
     /// Declare the "Update available" notification category with its action
     /// buttons. Must be called before adding a notification request that
     /// uses this category.
@@ -135,16 +152,19 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
             content.body = L("Claude is waiting for input")
         }
         content.sound = .default
+        content.interruptionLevel = .active
         content.userInfo = ["sessionId": session.id]
 
         // Remember the session so we can dispatch the click callback.
         pending[session.id] = session
 
+        let id = "claudette.idle.\(session.id)"
         let request = UNNotificationRequest(
-            identifier: "claudette.idle.\(session.id)",
+            identifier: id,
             content: content,
             trigger: nil
         )
+        scheduleAutoRemove(id: id)
         UNUserNotificationCenter.current().add(request) { [weak self] error in
             // If UN fails (denied, bundle not registered…), fall back to
             // AppleScript so the user still sees a notification.

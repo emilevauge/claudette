@@ -270,11 +270,7 @@ private struct SessionRow: View {
 
                 Spacer(minLength: 0)
 
-                Image(systemName: session.isClaudeDesktop
-                      ? "app.dashed"
-                      : "arrow.up.right.square")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                appAffordance
                     .padding(.top, 4)
             }
             .padding(.horizontal, 12)
@@ -315,6 +311,33 @@ private struct SessionRow: View {
         }
     }
 
+    /// Right,side affordance: the real .app icon of the target (Ghostty
+    /// terminal or Claude Desktop), rendered in black,and,white via
+    /// `saturation(0)` to blend with the row's neutral palette.
+    @ViewBuilder
+    private var appAffordance: some View {
+        let bundleId = session.isClaudeDesktop
+            ? "com.anthropic.claudefordesktop"
+            : "com.mitchellh.ghostty"
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            Image(nsImage: icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 16, height: 16)
+                .saturation(0)
+                .opacity(0.55)
+        } else {
+            // App not installed: fall back to the previous SF Symbol so the
+            // row still has something on the right.
+            Image(systemName: session.isClaudeDesktop
+                  ? "app.dashed"
+                  : "arrow.up.right.square")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
     @ViewBuilder
     private var statusLabel: some View {
         switch session.phase {
@@ -327,9 +350,7 @@ private struct SessionRow: View {
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(Color(red: 0.80, green: 0.20, blue: 0.18))
         case .idle:
-            Text(L("waiting"))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(Color(red: 0.15, green: 0.60, blue: 0.25))
+            EmptyView()
         }
     }
 

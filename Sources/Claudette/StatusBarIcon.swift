@@ -33,25 +33,32 @@ struct StatusBarIcon: View {
     let phase: Phase
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(tint)
-            .symbolEffect(.pulse, options: .repeating, isActive: shouldPulse)
+        icon
             .frame(width: 22, height: 22)
             .accessibilityLabel("Claudette")
     }
 
-    private var symbol: String {
-        phase == .empty ? "terminal" : "terminal.fill"
+    @ViewBuilder
+    private var icon: some View {
+        let base = Image(systemName: symbol)
+            .font(.system(size: 14, weight: phase == .needsAttention ? .bold : .semibold))
+            .foregroundStyle(phase == .needsAttention ? Color.red : .primary)
+            .symbolEffect(.pulse, options: .repeating, isActive: shouldPulse)
+
+        if phase == .needsAttention {
+            // Soft white halo around the red glyph: stacked low,radius
+            // shadows reinforce each other into a thin glow that reads as
+            // an outline against any menu bar wallpaper.
+            base
+                .shadow(color: .white, radius: 0.8)
+                .shadow(color: .white, radius: 0.8)
+        } else {
+            base
+        }
     }
 
-    /// `.primary` adapts to dark/light menu bar automatically. The
-    /// `needsAttention` red is fixed so it stays alarming on both modes.
-    private var tint: Color {
-        switch phase {
-        case .needsAttention: return Color(red: 0.92, green: 0.26, blue: 0.21)
-        case .empty, .idle, .busy: return .primary
-        }
+    private var symbol: String {
+        phase == .empty ? "terminal" : "terminal.fill"
     }
 
     private var shouldPulse: Bool {

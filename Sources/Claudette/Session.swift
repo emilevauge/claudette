@@ -26,12 +26,6 @@ struct ClaudeSession: Identifiable, Hashable {
     var terminalTitle: String?
     var terminalId: String?
 
-    /// Refined idle state, read from the JSONL transcript. Used to
-    /// distinguish a clean turn end (Claude is done, user can move on)
-    /// from a state where Claude is blocked waiting for the user to act,
-    /// be it a permission prompt or a structured `AskUserQuestion`.
-    var idleKind: IdleKind = .unknown
-
     var id: String { sessionId.isEmpty ? "\(pid)" : sessionId }
 
     /// True when this session is a Claude Desktop background agent rather
@@ -39,36 +33,28 @@ struct ClaudeSession: Identifiable, Hashable {
     /// `ClaudeDesktopBridge` for focus; never matched against Ghostty.
     var isClaudeDesktop: Bool { entrypoint == "claude-desktop" }
 
-    /// Refined idle state, surfaced through `idleKind`.
-    enum IdleKind: Equatable {
-        /// We could not determine the kind from the JSONL (transcript
-        /// missing or too short). Treated as `.idle` by the UI.
-        case unknown
-        /// Claude finished its turn cleanly. JSONL signature: latest
-        /// relevant entry is a `system / subtype: turn_duration`, or an
-        /// `assistant` whose `stop_reason` is `end_turn` / `stop_sequence`.
-        case idle
-        /// Claude is blocked waiting for a user action : either a tool
-        /// permission prompt (any tool gated by `--permission-mode`) or a
-        /// structured `AskUserQuestion`. JSONL signature: the latest
-        /// `assistant` has `stop_reason: tool_use` and no `user / tool_result`
-        /// matches its `tool_use_id` in subsequent entries.
-        case needsAttention
-    }
-
-    /// Effective phase combining the busy/idle title heuristic and the
-    /// refined JSONL state. The UI maps this to color, label and pulse.
+    /// Effective phase. The UI maps this to color, label and pulse.
     enum Phase {
         case busy
         case needsAttention
         case idle
     }
 
+    /// The Claude Code daemon writes the session JSON with three observed
+    /// `status` values, updated in real,time (the JSONL transcript is too
+    /// heavily buffered to be reliable for live state) :
+    ///   - "busy"    : the model is producing output.
+    ///   - "waiting" : the CLI is blocked on a user response, either a
+    ///                 structured `AskUserQuestion` or a permission prompt.
+    ///   - "idle"    : the turn is fully wrapped up, plain `>` prompt.
+    /// We map them directly. Anything unrecognised (including `null` for
+    /// Claude Desktop agents) falls back to the title,based busy detection.
     var phase: Phase {
-        if isBusy { return .busy }
-        switch idleKind {
-        case .needsAttention: return .needsAttention
-        case .idle, .unknown: return .idle
+        switch status {
+        case "busy":    return .busy
+        case "waiting": return .needsAttention
+        case "idle":    return .idle
+        default:        return isBusy ? .busy : .idle
         }
     }
 
