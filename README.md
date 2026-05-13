@@ -25,7 +25,7 @@ open /Applications/Claudette.app
 ## Features
 
 - **Live session list** : reads `~/.claude/sessions/*.json` every 2 s and keeps only sessions whose PID is still alive (`kill(pid, 0)`).
-- **Three,state activity dot** : orange pulsing while Claude is computing (Braille spinner in the Ghostty title), red pulsing when Claude is blocked waiting for you (a permission prompt or an `AskUserQuestion`, detected via `assistant stop_reason: tool_use` with no matching `user / tool_result` in the JSONL), green pulsing when the turn is fully wrapped up. All three pulse, so any live session feels alive in the menu bar.
+- **Three,state activity dot** : orange pulsing while Claude is computing (Braille spinner in the Ghostty title), red pulsing when Claude is blocked waiting for you (a permission prompt or an `AskUserQuestion`, detected via `assistant stop_reason: tool_use` with no matching `user / tool_result` in the JSONL), steady green when the turn is fully wrapped up. Only the two active states pulse, so idle sessions don't blink at you for no reason.
 - **LLM,generated subtitle** : each row shows the `ai-title` Claude Code writes into the JSONL transcript, the same string it injects into the Ghostty tab title. Updates live as the conversation progresses.
 - **Per-session metrics** : working directory, total session duration, time since last activity.
 - **Context window fill bar** : thin colored bar at the bottom of each row (green → yellow → orange → red) showing the live `context_window.used_percentage` Claude Code reports. Requires the user's status line in `~/.claude/settings.json` to expose the JSON to `/tmp/claudette/<sessionId>.json` (Claudette's installer can add the two,line `tee` shim to your existing `statusline-command.sh`); the bar simply hides itself when the sidecar is missing.
@@ -37,6 +37,10 @@ open /Applications/Claudette.app
 - **Global keyboard shortcut** : configurable via a `KeyboardShortcuts` recorder in the settings pane. Default `⌃Space`.
 - **Launch at login** : optional, implemented via a user `LaunchAgent` so it works on a raw SPM binary (no `.app` bundle required for that feature).
 - **Localised** : English, French, Spanish, auto-selected from the OS locale.
+
+<p align="center">
+  <img src="docs/screenshot-settings.png" width="520" alt="Claudette settings panel anchored to the gear button"/>
+</p>
 
 ## Requirements
 
