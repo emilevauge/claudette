@@ -20,8 +20,5 @@
 "Update available" = "Update available";
 "Claudette %@ is available. Click to open the release." = "Claudette %@ is available. Click to open the release.";
 "Claudette %@ is available." = "Claudette %@ is available.";
-"Test notification" = "Test notification";
-"Preview" = "Preview";
-"Show a sample notification to preview the design." = "Show a sample notification to preview the design.";
 "List height" = "List height";
 "Maximum height of the session list in the menu bar popover." = "Maximum height of the session list in the menu bar popover.";

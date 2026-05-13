@@ -41,31 +41,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Button(L("Test notification")) {
-                    let demo = ClaudeSession(
-                        pid: 0,
-                        sessionId: "demo",
-                        cwd: NSHomeDirectory() + "/dev/claudette",
-                        startedAt: Date().addingTimeInterval(-3725),
-                        updatedAt: Date(),
-                        version: "demo",
-                        status: "idle",
-                        kind: "interactive",
-                        entrypoint: "cli",
-                        name: "Build Swift menu app for Claude Code sessions"
-                    )
-                    let preview = "Voici un exemple de message produit par Claude qui s'affichera dans la notification."
-                    SystemNotifications.shared.notifyIdle(demo, lastText: preview)
-                }
-            } header: {
-                Text(L("Preview"))
-            } footer: {
-                Text(L("Show a sample notification to preview the design."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
                 Toggle(L("Launch at login"), isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
                         do {
