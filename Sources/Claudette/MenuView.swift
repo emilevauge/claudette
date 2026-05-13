@@ -287,7 +287,7 @@ private struct SessionRow: View {
 
     @ViewBuilder
     private var statusIndicator: some View {
-        let color: Color = session.isBusy ? Self.orange : Self.green
+        let color = Self.color(for: session.phase)
 
         ZStack {
             Circle()
@@ -297,23 +297,36 @@ private struct SessionRow: View {
             Image(systemName: "circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(color)
-                // Native macOS 14 SymbolEffect: Core Animation, no SwiftUI
-                // re-render on every frame unlike a custom scaleEffect+opacity
-                // ViewModifier.
-                .symbolEffect(.pulse, options: .repeating, isActive: session.isBusy)
+                // Pulse in every active phase. Core Animation under the hood,
+                // not a SwiftUI re,render per frame.
+                .symbolEffect(.pulse, options: .repeating, isActive: true)
         }
     }
 
     private static let orange = Color(red: 1.00, green: 0.58, blue: 0.00)
-    private static let green = Color(red: 0.20, green: 0.78, blue: 0.35)
+    private static let red    = Color(red: 0.92, green: 0.26, blue: 0.21)
+    private static let green  = Color(red: 0.20, green: 0.78, blue: 0.35)
+
+    private static func color(for phase: ClaudeSession.Phase) -> Color {
+        switch phase {
+        case .busy:           return orange
+        case .needsAttention: return red
+        case .idle:           return green
+        }
+    }
 
     @ViewBuilder
     private var statusLabel: some View {
-        if session.isBusy {
+        switch session.phase {
+        case .busy:
             Text(L("thinking…"))
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(Color(red: 0.95, green: 0.45, blue: 0.00))
-        } else if session.status == "idle" {
+        case .needsAttention:
+            Text(L("needs attention"))
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Color(red: 0.80, green: 0.20, blue: 0.18))
+        case .idle:
             Text(L("waiting"))
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(Color(red: 0.15, green: 0.60, blue: 0.25))

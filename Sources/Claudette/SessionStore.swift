@@ -54,6 +54,13 @@ final class SessionStore: ObservableObject {
                 continue
             }
             session.aiTitle = ConversationReader.aiTitle(for: session)
+            // Resolve the refined idle kind only when we'll actually use
+            // it (not busy), to avoid re,reading the JSONL on every tick
+            // for sessions that are visibly busy via the Ghostty title.
+            // The title comes from `annotate(...)` later, so for now
+            // compute idleKind unconditionally; it's cheap with the
+            // tail,read.
+            session.idleKind = ConversationReader.idleKind(for: session)
             alive.append(session)
         }
 

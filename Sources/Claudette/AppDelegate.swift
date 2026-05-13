@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, ObservableObject {
     private var popover: NSPopover?
     private var cancellables = Set<AnyCancellable>()
 
+    /// Hosting view for the SwiftUI,rendered status,bar icon. Kept as a
+    /// strong reference so its CALayer animations keep ticking.
+    private var statusIconHost: NSHostingView<StatusBarIcon>?
+
     private override init() {
         super.init()
         NotificationCenter.default.addObserver(
@@ -57,12 +61,26 @@ final class AppDelegate: NSObject, ObservableObject {
     // MARK: status item
 
     private func setupStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Fixed width so the SwiftUI hosting view has predictable bounds.
+        let item = NSStatusBar.system.statusItem(withLength: 26)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "terminal",
-                                   accessibilityDescription: "Claudette")
             button.action = #selector(togglePopover(_:))
             button.target = self
+
+            let host = NSHostingView(
+                rootView: StatusBarIcon(phase: .empty)
+            )
+            host.translatesAutoresizingMaskIntoConstraints = false
+            // The SwiftUI view should not steal clicks from the button.
+            host.allowedTouchTypes = []
+            button.addSubview(host)
+            NSLayoutConstraint.activate([
+                host.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+                host.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                host.widthAnchor.constraint(equalToConstant: 22),
+                host.heightAnchor.constraint(equalToConstant: 22),
+            ])
+            statusIconHost = host
         }
         statusItem = item
     }
@@ -79,15 +97,16 @@ final class AppDelegate: NSObject, ObservableObject {
     }
 
     private func observeSessions() {
-        // Switch the menu bar icon depending on whether any session is busy.
+        // Reflect the aggregate session phase in the menu,bar icon:
+        // empty (no sessions) -> outline, no pulse
+        // any needs attention -> filled, red, pulse
+        // any busy            -> filled, neutral tint, pulse
+        // otherwise (idle)    -> filled, neutral tint, no pulse
         store.$sessions
-            .map { $0.contains(where: { $0.isBusy }) }
+            .map(StatusBarIcon.Phase.compute(from:))
             .removeDuplicates()
-            .sink { [weak self] busy in
-                self?.statusItem?.button?.image = NSImage(
-                    systemSymbolName: busy ? "terminal.fill" : "terminal",
-                    accessibilityDescription: "Claudette"
-                )
+            .sink { [weak self] phase in
+                self?.statusIconHost?.rootView = StatusBarIcon(phase: phase)
             }
             .store(in: &cancellables)
     }

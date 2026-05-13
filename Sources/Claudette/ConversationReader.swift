@@ -74,6 +74,96 @@ enum ConversationReader {
         return title
     }
 
+    /// Detect whether Claude is mid,turn waiting for the user (permission
+    /// prompt or `AskUserQuestion`) versus a clean turn end. Returns
+    /// `.unknown` when the transcript is missing or the tail doesn't
+    /// contain a discriminating entry.
+    ///
+    /// Algorithm: tail,read the JSONL, walk lines in reverse. The first
+    /// "discriminating" entry wins :
+    ///   - `system / subtype: turn_duration` → `.idle`
+    ///   - `user` with a `tool_result` content block → `.idle` (the result
+    ///     just landed; if Claude were responding, the title would say so)
+    ///   - `assistant` with `stop_reason: tool_use` → `.needsAttention`
+    ///   - `assistant` with `stop_reason: end_turn` / `stop_sequence` → `.idle`
+    static func idleKind(for session: ClaudeSession) -> ClaudeSession.IdleKind {
+        let path = transcriptPath(for: session)
+        guard FileManager.default.fileExists(atPath: path) else { return .unknown }
+        return readIdleKind(from: path)
+    }
+
+    private static func readIdleKind(from path: String) -> ClaudeSession.IdleKind {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return .unknown }
+        defer { try? handle.close() }
+
+        let size: UInt64
+        do { size = try handle.seekToEnd() } catch { return .unknown }
+        if size == 0 { return .unknown }
+
+        // Most "turn boundary" entries (turn_duration, end_turn, tool_use
+        // ending an assistant block) are small. 64 KB tail captures the
+        // last few turns comfortably. Same exponential strategy as aiTitle.
+        var window: UInt64 = 64 * 1024
+        let maxWindow: UInt64 = 4 * 1024 * 1024
+
+        while true {
+            let from = size > window ? size - window : 0
+            do { try handle.seek(toOffset: from) } catch { return .unknown }
+            let data: Data = (try? handle.readToEnd()) ?? Data()
+
+            var slice = data[...]
+            if from > 0, let nl = slice.firstIndex(of: 0x0A) {
+                slice = slice[(nl + 1)...]
+            }
+
+            if let kind = lastIdleKind(in: Data(slice)) {
+                return kind
+            }
+
+            if from == 0 || window >= maxWindow { return .unknown }
+            window = min(window * 4, maxWindow)
+        }
+    }
+
+    private static func lastIdleKind(in data: Data) -> ClaudeSession.IdleKind? {
+        guard let content = String(data: data, encoding: .utf8) else { return nil }
+        for line in content.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard let bytes = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
+                continue
+            }
+            let type = obj["type"] as? String
+
+            if type == "system",
+               (obj["subtype"] as? String) == "turn_duration" {
+                return .idle
+            }
+
+            if type == "assistant",
+               let msg = obj["message"] as? [String: Any] {
+                switch msg["stop_reason"] as? String {
+                case "tool_use":
+                    return .needsAttention
+                case "end_turn", "stop_sequence":
+                    return .idle
+                default:
+                    continue
+                }
+            }
+
+            if type == "user",
+               let msg = obj["message"] as? [String: Any],
+               let blocks = msg["content"] as? [[String: Any]],
+               blocks.contains(where: { ($0["type"] as? String) == "tool_result" }) {
+                // A tool_result just arrived. The title would still be a
+                // Braille spinner if Claude were composing a follow,up,
+                // so reaching this code means Claude is idle for now.
+                return .idle
+            }
+        }
+        return nil
+    }
+
     private static func transcriptPath(for session: ClaudeSession) -> String {
         let slug = projectSlug(for: session.cwd)
         return "\(NSHomeDirectory())/.claude/projects/\(slug)/\(session.sessionId).jsonl"

@@ -25,7 +25,7 @@ open /Applications/Claudette.app
 ## Features
 
 - **Live session list** : reads `~/.claude/sessions/*.json` every 2 s and keeps only sessions whose PID is still alive (`kill(pid, 0)`).
-- **True activity state** : the busy/idle dot is derived from the Ghostty window title (Braille spinner = thinking, `✳` = waiting) so it stays accurate even when the JSON `status` field is stale.
+- **Three,state activity dot** : orange pulsing while Claude is computing (Braille spinner in the Ghostty title), red pulsing when Claude is blocked waiting for you (a permission prompt or an `AskUserQuestion`, detected via `assistant stop_reason: tool_use` with no matching `user / tool_result` in the JSONL), green pulsing when the turn is fully wrapped up. All three pulse, so any live session feels alive in the menu bar.
 - **LLM,generated subtitle** : each row shows the `ai-title` Claude Code writes into the JSONL transcript, the same string it injects into the Ghostty tab title. Updates live as the conversation progresses.
 - **Per-session metrics** : working directory, total session duration, time since last activity.
 - **Instant search** : start typing as soon as the popover opens, multi-token filter on name, ai,title, path and basename. `↑↓` to navigate, `↵` to focus, `esc` to clear/close.
