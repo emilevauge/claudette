@@ -24,19 +24,15 @@ open /Applications/Claudette.app
 
 ## Features
 
-- **Live session list** : reads `~/.claude/sessions/*.json` every 2 s and keeps only sessions whose PID is still alive (`kill(pid, 0)`).
-- **Three,state activity dot** : orange pulsing while Claude is computing (Braille spinner in the Ghostty title), red pulsing when Claude is blocked waiting for you (a permission prompt or an `AskUserQuestion`, detected via `assistant stop_reason: tool_use` with no matching `user / tool_result` in the JSONL), steady green when the turn is fully wrapped up. Only the two active states pulse, so idle sessions don't blink at you for no reason.
-- **LLM,generated subtitle** : each row shows the `ai-title` Claude Code writes into the JSONL transcript, the same string it injects into the Ghostty tab title. Updates live as the conversation progresses.
-- **Per-session metrics** : working directory, total session duration, time since last activity.
-- **Context window fill bar** : thin colored bar at the bottom of each row (green → yellow → orange → red) showing the live `context_window.used_percentage` Claude Code reports. Requires the user's status line in `~/.claude/settings.json` to expose the JSON to `/tmp/claudette/<sessionId>.json` (Claudette's installer can add the two,line `tee` shim to your existing `statusline-command.sh`); the bar simply hides itself when the sidecar is missing.
-- **Instant search** : start typing as soon as the popover opens, multi-token filter on name, ai,title, path and basename. `↑↓` to navigate, `↵` to focus, `esc` to clear/close.
-- **One-click focus** : matches the right Ghostty terminal by `ai-title` (deterministic, even with multiple tabs in the same cwd) with a `working directory` + Braille/`✳` heuristic fallback, then issues the Ghostty `focus terminal <id>` AppleScript so the right window, tab and split come to the front.
-- **Claude Desktop sessions** : background agents launched from the Claude Desktop app (`entrypoint = claude-desktop` in the session JSON) are listed too, with a distinct icon. Clicking activates the Claude app since these sessions have no terminal of their own.
-- **One-click auto,update** : when a newer release is available, the notification carries an `Update` action that downloads the DMG, swaps the bundle in place via a detached helper script, and relaunches Claudette. The `Release notes` action opens the GitHub page if you want to read what changed first.
-- **Native notifications** : when a session transitions from thinking to waiting, macOS shows a notification with title, path and preview of the last assistant message. Click it to focus the corresponding Ghostty window.
-- **Global keyboard shortcut** : configurable via a `KeyboardShortcuts` recorder in the settings pane. Default `⌃Space`.
-- **Launch at login** : optional, implemented via a user `LaunchAgent` so it works on a raw SPM binary (no `.app` bundle required for that feature).
-- **Localised** : English, French, Spanish, auto-selected from the OS locale.
+- **Live session list** : every running Claude Code session, refreshed every 2 s, dead PIDs culled automatically.
+- **Three,state activity dot** : orange pulses while Claude thinks, red pulses when it's blocked waiting on you (permission prompt or `AskUserQuestion`), steady green when idle.
+- **Rich rows** : LLM,generated `ai-title`, working directory, total duration, time since last activity, and a colored context,window fill bar (green → red) reading the live `used_percentage` from your status,line sidecar.
+- **One,click focus** : matches the session by `ai-title` and jumps to the exact Ghostty window, tab and split. Background agents launched from Claude Desktop are listed too and activate Claude.app on click.
+- **Instant search** : start typing as soon as the popover opens, multi,token filter on name, title and path. `↑↓` navigate, `↵` focus, `esc` close.
+- **Native notifications** : when Claude flips from thinking to waiting, with a preview of the last message; click to focus the terminal.
+- **One,click auto,update** : the update notification carries an `Update` action that downloads the DMG, swaps the bundle and relaunches Claudette.
+- **Global shortcut + launch at login** : configurable shortcut (default `⌃Space`), optional auto,start via a user `LaunchAgent`.
+- **Localised** : English, French, Spanish, auto,selected from the OS locale.
 
 <p align="center">
   <img src="docs/screenshot-settings.png" width="520" alt="Claudette settings panel anchored to the gear button"/>
