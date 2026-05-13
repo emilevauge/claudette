@@ -31,6 +31,7 @@ open /Applications/Claudette.app
 - **Instant search** : start typing as soon as the popover opens, multi-token filter on name, ai,title, path and basename. `↑↓` to navigate, `↵` to focus, `esc` to clear/close.
 - **One-click focus** : matches the right Ghostty terminal by `ai-title` (deterministic, even with multiple tabs in the same cwd) with a `working directory` + Braille/`✳` heuristic fallback, then issues the Ghostty `focus terminal <id>` AppleScript so the right window, tab and split come to the front.
 - **Claude Desktop sessions** : background agents launched from the Claude Desktop app (`entrypoint = claude-desktop` in the session JSON) are listed too, with a distinct icon. Clicking activates the Claude app since these sessions have no terminal of their own.
+- **One-click auto,update** : when a newer release is available, the notification carries an `Update` action that downloads the DMG, swaps the bundle in place via a detached helper script, and relaunches Claudette. The `Release notes` action opens the GitHub page if you want to read what changed first.
 - **Native notifications** : when a session transitions from thinking to waiting, macOS shows a notification with title, path and preview of the last assistant message. Click it to focus the corresponding Ghostty window.
 - **Global keyboard shortcut** : configurable via a `KeyboardShortcuts` recorder in the settings pane. Default `⌃Space`.
 - **Launch at login** : optional, implemented via a user `LaunchAgent` so it works on a raw SPM binary (no `.app` bundle required for that feature).
@@ -113,6 +114,8 @@ Key files :
 - `Sources/Claudette/SessionStore.swift` : polling + Ghostty annotation.
 - `Sources/Claudette/GhosttyBridge.swift` : AppleScript ↔ Ghostty.
 - `Sources/Claudette/ClaudeDesktopBridge.swift` : activates the Claude Desktop app for sessions without a terminal.
+- `Sources/Claudette/UpdateChecker.swift` : queries the GitHub releases API at launch, fires the "Update available" notification.
+- `Sources/Claudette/SelfUpdater.swift` : downloads the new DMG, stages a detached zsh helper that swaps the bundle and relaunches.
 - `Sources/Claudette/MenuView.swift` : popover UI.
 - `Sources/Claudette/AppDelegate.swift` : `NSStatusItem` + `NSPopover` + global shortcut.
 - `Sources/Claudette/SystemNotifications.swift` : native notifications.

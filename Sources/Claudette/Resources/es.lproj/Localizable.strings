@@ -20,5 +20,14 @@
 "Update available" = "Actualización disponible";
 "Claudette %@ is available. Click to open the release." = "Claudette %@ está disponible. Pulsa para abrir la versión.";
 "Claudette %@ is available." = "Claudette %@ está disponible.";
+"Update" = "Actualizar";
+"Release notes" = "Notas de la versión";
+"About" = "Acerca de";
+"Version" = "Versión";
+"Check for updates" = "Buscar actualizaciones";
+"Up to date" = "Está al día";
+"%@ is available" = "%@ está disponible";
+"Update to %@ now" = "Actualizar a %@ ahora";
+"Could not reach github.com" = "github.com inalcanzable";
 "List height" = "Altura de la lista";
 "Maximum height of the session list in the menu bar popover." = "Altura máxima de la lista de sesiones en la ventana de la barra de menús.";

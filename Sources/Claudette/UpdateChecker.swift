@@ -1,28 +1,72 @@
 import Foundation
 import AppKit
 
-/// Checks at startup whether a newer release is published on GitHub.
-/// Public anonymous API (60 req/h limit per IP, more than enough for one
-/// check at startup). When a newer version is found, fires a clickable
-/// system notification that opens the release page in the browser.
+/// Queries the GitHub releases API to detect newer versions of Claudette.
+/// Public anonymous API (60 req/h limit per IP, more than enough). Two
+/// entry points :
+///   `checkInBackground()` : called at launch, fires a clickable system
+///       notification when a newer release is found. Deduplicated via
+///       UserDefaults so the same version is only signalled once.
+///   `checkManually()` : called from the Settings panel, returns the
+///       result synchronously and does not touch the dedup state.
 @MainActor
 enum UpdateChecker {
 
     private static let owner = "emilevauge"
     private static let repo = "claudette"
 
-    /// Run the check in the background, silently ignore any network error.
+    /// Outcome of a manual check, surfaced to the Settings UI.
+    enum ManualResult {
+        case upToDate(current: String)
+        case newer(version: String, pageURL: URL, dmgURL: URL?)
+        case error(String)
+    }
+
+    /// Version of the running bundle as displayed in Settings and used as
+    /// the comparison base.
+    static func currentVersionString() -> String { currentVersion() }
+
+    /// Run the background check at startup. Silently ignores network errors.
     static func checkInBackground() {
         // Skip when not in a .app bundle (raw SPM binary: no reliable version).
         guard Bundle.main.bundleIdentifier != nil else { return }
 
         Task.detached(priority: .background) {
-            await runCheck()
+            await runBackgroundCheck()
         }
     }
 
-    private static func runCheck() async {
-        guard let url = URL(string: "https://api.github.com/repos/\(owner)/\(repo)/releases/latest") else { return }
+    /// Synchronous,style check for the Settings panel. Always returns a
+    /// result, including network errors. Does not update the dedup
+    /// UserDefault: repeated clicks always hit the network.
+    static func checkManually() async -> ManualResult {
+        let current = currentVersion()
+        guard let release = await fetchLatest() else {
+            return .error("Could not reach github.com")
+        }
+        if isNewer(release.version, than: current) {
+            return .newer(version: release.version,
+                          pageURL: release.pageURL,
+                          dmgURL: release.dmgURL)
+        }
+        return .upToDate(current: current)
+    }
+
+    // MARK: private
+
+    /// Internal representation of a parsed GitHub release.
+    private struct Release {
+        let version: String
+        let pageURL: URL
+        let dmgURL: URL?
+    }
+
+    /// Hit the GitHub API and parse the bits we care about. Returns `nil`
+    /// on any network or parsing failure.
+    private static func fetchLatest() async -> Release? {
+        guard let url = URL(string: "https://api.github.com/repos/\(owner)/\(repo)/releases/latest") else {
+            return nil
+        }
         var req = URLRequest(url: url, cachePolicy: .reloadRevalidatingCacheData, timeoutInterval: 10)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("Claudette/\(currentVersion()) (macOS)", forHTTPHeaderField: "User-Agent")
@@ -31,25 +75,40 @@ enum UpdateChecker {
               let http = response as? HTTPURLResponse, http.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tagName = obj["tag_name"] as? String else {
-            return
+            return nil
         }
 
-        let latest = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
-        let current = currentVersion()
-        guard isNewer(latest, than: current) else { return }
-
-        // Don't re-notify for the same version on every launch.
-        let key = "lastNotifiedUpdateVersion"
-        if UserDefaults.standard.string(forKey: key) == latest { return }
-        UserDefaults.standard.set(latest, forKey: key)
+        let version = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
 
         let pageURL = (obj["html_url"] as? String).flatMap(URL.init(string:))
             ?? URL(string: "https://github.com/\(owner)/\(repo)/releases/latest")!
 
+        // Pull the Claudette.dmg asset URL when present, so the "Update"
+        // path can drive a self,replace. Releases without a DMG fall back
+        // to opening the release page.
+        let dmgURL = (obj["assets"] as? [[String: Any]])?.first(where: {
+            ($0["name"] as? String) == "Claudette.dmg"
+        }).flatMap { $0["browser_download_url"] as? String }
+        .flatMap(URL.init(string:))
+
+        return Release(version: version, pageURL: pageURL, dmgURL: dmgURL)
+    }
+
+    private static func runBackgroundCheck() async {
+        guard let release = await fetchLatest() else { return }
+        let current = currentVersion()
+        guard isNewer(release.version, than: current) else { return }
+
+        // Don't re-notify for the same version on every launch.
+        let key = "lastNotifiedUpdateVersion"
+        if UserDefaults.standard.string(forKey: key) == release.version { return }
+        UserDefaults.standard.set(release.version, forKey: key)
+
         await MainActor.run {
             SystemNotifications.shared.notifyUpdateAvailable(
-                version: latest,
-                url: pageURL
+                version: release.version,
+                pageURL: release.pageURL,
+                dmgURL: release.dmgURL
             )
         }
     }
@@ -58,7 +117,7 @@ enum UpdateChecker {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
     }
 
-    /// Compare two semver-ish strings like "0.1.0".
+    /// Compare two semver,ish strings like "0.1.0".
     private static func isNewer(_ a: String, than b: String) -> Bool {
         let pa = a.split(separator: ".").compactMap { Int($0) }
         let pb = b.split(separator: ".").compactMap { Int($0) }

@@ -22,11 +22,43 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
     /// .app), every call crashes. We disable notifications cleanly in that case.
     private let available: Bool = (Bundle.main.bundleIdentifier != nil)
 
+    /// Notification category identifiers. `nonisolated` so the delegate
+    /// dispatch (which runs off the main actor) can match against them.
+    nonisolated static let updateCategoryId = "claudette.update.available"
+    /// Action identifiers (must match what we register in
+    /// `registerCategories()`).
+    nonisolated static let updateActionNowId = "claudette.update.now"
+    nonisolated static let updateActionNotesId = "claudette.update.notes"
+
     private override init() {
         super.init()
         if available {
             UNUserNotificationCenter.current().delegate = self
+            registerCategories()
         }
+    }
+
+    /// Declare the "Update available" notification category with its action
+    /// buttons. Must be called before adding a notification request that
+    /// uses this category.
+    private func registerCategories() {
+        let updateNow = UNNotificationAction(
+            identifier: Self.updateActionNowId,
+            title: L("Update"),
+            options: [.foreground]
+        )
+        let notes = UNNotificationAction(
+            identifier: Self.updateActionNotesId,
+            title: L("Release notes"),
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: Self.updateCategoryId,
+            actions: [updateNow, notes],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
     /// Request the standard permission. On first launch macOS shows the
@@ -39,17 +71,22 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         ) { _, _ in /* ignored */ }
     }
 
-    /// Send an "update available" notification. Clicking it opens the GitHub
-    /// release page in the user's default browser.
-    func notifyUpdateAvailable(version: String, url: URL) {
+    /// Send an "update available" notification. Two actions:
+    ///   "Update" : drives `SelfUpdater.run(dmgURL:)` when a DMG asset URL
+    ///              is available, otherwise opens the release page.
+    ///   "Release notes" (and the default body tap) : opens the release page.
+    func notifyUpdateAvailable(version: String, pageURL: URL, dmgURL: URL?) {
         let content = UNMutableNotificationContent()
         content.title = L("Update available")
         content.body = L("Claudette \(version) is available. Click to open the release.")
         content.sound = .default
-        content.userInfo = ["openURL": url.absoluteString]
+        content.categoryIdentifier = Self.updateCategoryId
+        var info: [String: Any] = ["openURL": pageURL.absoluteString]
+        if let dmgURL { info["dmgURL"] = dmgURL.absoluteString }
+        content.userInfo = info
 
         guard available else {
-            notifyUpdateViaAppleScript(version: version, url: url)
+            notifyUpdateViaAppleScript(version: version, url: pageURL)
             return
         }
 
@@ -61,7 +98,7 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(request) { [weak self] error in
             if error != nil {
                 Task { @MainActor in
-                    self?.notifyUpdateViaAppleScript(version: version, url: url)
+                    self?.notifyUpdateViaAppleScript(version: version, url: pageURL)
                 }
             }
         }
@@ -130,15 +167,29 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound, .list])
     }
 
-    /// Click or action on the notification: focus the Ghostty window.
+    /// Click or action on the notification.
+    /// Routing:
+    ///   - "Update" action: trigger `SelfUpdater` with the DMG URL when
+    ///     present, otherwise fall back to opening the release page.
+    ///   - "Release notes" action and default body tap: open the release
+    ///     page in the browser.
+    ///   - Idle session notification: focus the Ghostty terminal.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        if let urlString = info["openURL"] as? String, let url = URL(string: urlString) {
-            // "Update available" notification: open the release page.
+        let action = response.actionIdentifier
+
+        if action == Self.updateActionNowId,
+           let dmgString = info["dmgURL"] as? String,
+           let dmgURL = URL(string: dmgString) {
+            Task { @MainActor in await SelfUpdater.run(dmgURL: dmgURL) }
+        } else if let urlString = info["openURL"] as? String,
+                  let url = URL(string: urlString) {
+            // Default tap, "Release notes", or "Update" without a DMG asset:
+            // open the release page.
             Task { @MainActor in NSWorkspace.shared.open(url) }
         } else if let id = info["sessionId"] as? String {
             Task { @MainActor in
