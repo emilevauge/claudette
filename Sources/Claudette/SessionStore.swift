@@ -104,6 +104,9 @@ final class SessionStore: ObservableObject {
         _ session: ClaudeSession,
         with terminals: [GhosttyBridge.GhosttyTerminal]
     ) -> ClaudeSession {
+        // Claude Desktop agents have no terminal of their own; skip matching.
+        if session.isClaudeDesktop { return session }
+
         // Step 0: deterministic match via aiTitle when available.
         if let aiTitle = session.aiTitle, !aiTitle.isEmpty,
            let t = terminals.first(where: { titleMatches($0.name, aiTitle: aiTitle) }) {

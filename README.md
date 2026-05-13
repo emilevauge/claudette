@@ -1,6 +1,6 @@
 # Claudette
 
-A macOS menu bar app that lists every running Claude Code session and lets you jump to its Ghostty window in one click.
+A macOS menu bar app that lists every running Claude Code session and lets you jump to its Ghostty terminal (or the Claude Desktop app) in one click.
 
 <p align="center">
   <img src="docs/screenshot.png" width="480" alt="Claudette popover showing live Claude Code sessions"/>
@@ -27,6 +27,7 @@ open /Applications/Claudette.app
 - **Per-session metrics** : working directory, total session duration, time since last activity.
 - **Instant search** : start typing as soon as the popover opens, multi-token filter on name, ai,title, path and basename. `↑↓` to navigate, `↵` to focus, `esc` to clear/close.
 - **One-click focus** : matches the right Ghostty terminal by `ai-title` (deterministic, even with multiple tabs in the same cwd) with a `working directory` + Braille/`✳` heuristic fallback, then issues the Ghostty `focus terminal <id>` AppleScript so the right window, tab and split come to the front.
+- **Claude Desktop sessions** : background agents launched from the Claude Desktop app (`entrypoint = claude-desktop` in the session JSON) are listed too, with a distinct icon. Clicking activates the Claude app since these sessions have no terminal of their own.
 - **Native notifications** : when a session transitions from thinking to waiting, macOS shows a notification with title, path and preview of the last assistant message. Click it to focus the corresponding Ghostty window.
 - **Global keyboard shortcut** : configurable via a `KeyboardShortcuts` recorder in the settings pane. Default `⌃Space`.
 - **Launch at login** : optional, implemented via a user `LaunchAgent` so it works on a raw SPM binary (no `.app` bundle required for that feature).
@@ -108,6 +109,7 @@ Key files :
 
 - `Sources/Claudette/SessionStore.swift` : polling + Ghostty annotation.
 - `Sources/Claudette/GhosttyBridge.swift` : AppleScript ↔ Ghostty.
+- `Sources/Claudette/ClaudeDesktopBridge.swift` : activates the Claude Desktop app for sessions without a terminal.
 - `Sources/Claudette/MenuView.swift` : popover UI.
 - `Sources/Claudette/AppDelegate.swift` : `NSStatusItem` + `NSPopover` + global shortcut.
 - `Sources/Claudette/SystemNotifications.swift` : native notifications.

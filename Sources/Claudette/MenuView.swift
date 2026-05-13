@@ -204,10 +204,14 @@ struct MenuView: View {
 
     private func focus(_ session: ClaudeSession) {
         // Close the popover first: NSPopover.transient closes on its own as
-        // soon as Ghostty takes focus, and closing it manually afterwards can
-        // interrupt the AppleScript activation chain.
+        // soon as the target app takes focus, and closing it manually
+        // afterwards can interrupt the AppleScript activation chain.
         AppDelegate.shared.closePopover()
-        _ = GhosttyBridge.focus(session: session)
+        if session.isClaudeDesktop {
+            _ = ClaudeDesktopBridge.focus(session: session)
+        } else {
+            _ = GhosttyBridge.focus(session: session)
+        }
     }
 }
 
@@ -266,7 +270,9 @@ private struct SessionRow: View {
 
                 Spacer(minLength: 0)
 
-                Image(systemName: "arrow.up.right.square")
+                Image(systemName: session.isClaudeDesktop
+                      ? "app.dashed"
+                      : "arrow.up.right.square")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .padding(.top, 4)

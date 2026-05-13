@@ -28,6 +28,11 @@ struct ClaudeSession: Identifiable, Hashable {
 
     var id: String { sessionId.isEmpty ? "\(pid)" : sessionId }
 
+    /// True when this session is a Claude Desktop background agent rather
+    /// than an interactive `claude` CLI invocation in a terminal. Routed to
+    /// `ClaudeDesktopBridge` for focus; never matched against Ghostty.
+    var isClaudeDesktop: Bool { entrypoint == "claude-desktop" }
+
     /// Displayed label: explicit name if any, otherwise basename of cwd.
     var displayName: String {
         if let name, !name.isEmpty { return name }
