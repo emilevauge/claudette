@@ -10,11 +10,14 @@ A macOS menu bar app that lists every running Claude Code session and lets you j
 
 Grab the latest signed `.app` from the [releases page](https://github.com/emilevauge/claudette/releases/latest).
 
+Double-click `Claudette.dmg` and drag the app onto the `Applications` shortcut. Or from the command line :
+
 ```sh
-curl -L -o Claudette.app.zip \
-  https://github.com/emilevauge/claudette/releases/latest/download/Claudette.app.zip
-unzip Claudette.app.zip
-mv Claudette.app /Applications/
+curl -L -o Claudette.dmg \
+  https://github.com/emilevauge/claudette/releases/latest/download/Claudette.dmg
+hdiutil attach Claudette.dmg
+cp -R "/Volumes/Claudette/Claudette.app" /Applications/
+hdiutil detach "/Volumes/Claudette"
 xattr -dr com.apple.quarantine /Applications/Claudette.app   # ad-hoc signed, bypass Gatekeeper
 open /Applications/Claudette.app
 ```

@@ -109,6 +109,23 @@ LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServic
 echo "✓ $APP prêt."
 echo "  Lancer : open $(pwd)/$APP"
 
+# ─── DMG (release artifact) ────────────────────────────────────────────────
+# Produit un Claudette.dmg drag-and-drop : icône Claudette.app à côté d'un
+# alias Applications. Utilise hdiutil natif, pas de dépendance Homebrew.
+DMG="Claudette.dmg"
+echo "▶ Empaquetage $DMG…"
+rm -f "$DMG"
+STAGE=$(mktemp -d)
+cp -R "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create \
+    -volname "Claudette" \
+    -srcfolder "$STAGE" \
+    -ov -format UDZO \
+    "$DMG" >/dev/null
+rm -rf "$STAGE"
+echo "✓ $DMG prêt ($(du -h "$DMG" | cut -f1))."
+
 if [ "${1:-}" = "--install" ]; then
     echo "▶ Installation dans /Applications…"
     rm -rf "/Applications/$APP"
