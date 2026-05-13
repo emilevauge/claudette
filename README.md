@@ -23,9 +23,10 @@ open /Applications/Claudette.app
 
 - **Live session list** : reads `~/.claude/sessions/*.json` every 2 s and keeps only sessions whose PID is still alive (`kill(pid, 0)`).
 - **True activity state** : the busy/idle dot is derived from the Ghostty window title (Braille spinner = thinking, `✳` = waiting) so it stays accurate even when the JSON `status` field is stale.
+- **LLM,generated subtitle** : each row shows the `ai-title` Claude Code writes into the JSONL transcript, the same string it injects into the Ghostty tab title. Updates live as the conversation progresses.
 - **Per-session metrics** : working directory, total session duration, time since last activity.
-- **Instant search** : start typing as soon as the popover opens, multi-token filter on name, path and basename. `↑↓` to navigate, `↵` to focus, `esc` to clear/close.
-- **One-click focus** : matches the right Ghostty terminal by `working directory` + title containing the session name + Braille/`✳` heuristic to skip neighbouring shells, then issues the Ghostty `focus terminal <id>` AppleScript so the right window, tab and split come to the front.
+- **Instant search** : start typing as soon as the popover opens, multi-token filter on name, ai,title, path and basename. `↑↓` to navigate, `↵` to focus, `esc` to clear/close.
+- **One-click focus** : matches the right Ghostty terminal by `ai-title` (deterministic, even with multiple tabs in the same cwd) with a `working directory` + Braille/`✳` heuristic fallback, then issues the Ghostty `focus terminal <id>` AppleScript so the right window, tab and split come to the front.
 - **Native notifications** : when a session transitions from thinking to waiting, macOS shows a notification with title, path and preview of the last assistant message. Click it to focus the corresponding Ghostty window.
 - **Global keyboard shortcut** : configurable via a `KeyboardShortcuts` recorder in the settings pane. Default `⌃Space`.
 - **Launch at login** : optional, implemented via a user `LaunchAgent` so it works on a raw SPM binary (no `.app` bundle required for that feature).
@@ -82,11 +83,15 @@ open /Applications/Claudette.app
 
 ```
 ~/.claude/sessions/<pid>.json   ──┐
-                                  ├─►  SessionStore (2 s polling)
-Ghostty AppleScript dictionary  ──┘         │
-        (working directory of terminals)    │
-                                            ▼
-                              ClaudeSession  (PID alive, isBusy from Ghostty title)
+~/.claude/projects/<slug>/        │
+       <sessionId>.jsonl          ├─►  SessionStore (2 s polling)
+       (last ai-title entry,      │      │
+        tail,read + mtime cache)  │      │
+Ghostty AppleScript dictionary  ──┘      │
+        (working directory + name        │
+         of terminals)                   │
+                                         ▼
+                              ClaudeSession  (PID alive, aiTitle, isBusy from Ghostty title)
                                             │
                             ┌───────────────┴───────────────┐
                             ▼                               ▼
@@ -95,7 +100,8 @@ Ghostty AppleScript dictionary  ──┘         │
                             │                         + AppleScript fallback)
                             ▼
                   GhosttyBridge.focus(session)
-                  └─► focus terminal <id>  (window + tab + split)
+                  └─► focus terminal <id>  (window + tab + split,
+                       matched by ai-title, fallback to cwd)
 ```
 
 Key files :
@@ -105,7 +111,7 @@ Key files :
 - `Sources/Claudette/MenuView.swift` : popover UI.
 - `Sources/Claudette/AppDelegate.swift` : `NSStatusItem` + `NSPopover` + global shortcut.
 - `Sources/Claudette/SystemNotifications.swift` : native notifications.
-- `Sources/Claudette/ConversationReader.swift` : last assistant text from `~/.claude/projects/<slug>/<sessionId>.jsonl`.
+- `Sources/Claudette/ConversationReader.swift` : last assistant text and last `ai-title` from `~/.claude/projects/<slug>/<sessionId>.jsonl` (tail,read, cached by mtime).
 - `Sources/Claudette/LaunchAgent.swift` : login item.
 - `make-app.sh` : `.app` packaging.
 

@@ -46,6 +46,7 @@ struct MenuView: View {
         return store.sessions.filter { s in
             let haystack = [
                 s.name ?? "",
+                s.aiTitle ?? "",
                 s.cwd,
                 URL(fileURLWithPath: s.cwd).lastPathComponent,
                 s.displayName,
@@ -229,6 +230,15 @@ private struct SessionRow: View {
                             .truncationMode(.middle)
 
                         statusLabel
+                    }
+
+                    if let aiTitle = session.aiTitle, !aiTitle.isEmpty {
+                        Text(aiTitle)
+                            .font(.caption)
+                            .foregroundStyle(.primary.opacity(0.85))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .help(aiTitle)
                     }
 
                     Text(prettyPath(session.cwd))

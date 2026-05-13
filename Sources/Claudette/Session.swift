@@ -13,6 +13,13 @@ struct ClaudeSession: Identifiable, Hashable {
     let entrypoint: String
     let name: String?
 
+    /// Latest LLM,generated title for this session, read from the JSONL
+    /// transcript (`{"type":"ai-title","aiTitle":"..."}` entries). This is
+    /// exactly the string Claude Code injects into the Ghostty tab title
+    /// (modulo the leading spinner/`✳` glyph), so it doubles as a perfect
+    /// matching key when annotating with a Ghostty terminal.
+    var aiTitle: String?
+
     /// Populated by SessionStore when we manage to match a Ghostty terminal.
     /// This is our source of truth for `isBusy` because Claude refreshes the
     /// terminal title on every spinner tick.

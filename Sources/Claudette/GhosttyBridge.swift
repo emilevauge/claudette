@@ -14,20 +14,29 @@ enum GhosttyBridge {
 
     /// Try to focus the window/tab/split running the given session.
     /// Strategy:
-    ///   1. exact match on the terminal's `working directory`.
-    ///   2. if multiple candidates, prefer the one whose title contains the session `name`.
+    ///   0. if SessionStore already mapped a terminal id, use it directly.
+    ///   1. if we know the session's `aiTitle`, match by exact title (deterministic).
+    ///   2. exact match on the terminal's `working directory`, tie,break by title.
     ///   3. if no cwd match, fallback: window whose title contains the session `name`.
     ///   4. last resort: just bring Ghostty to the front.
     @discardableResult
     static func focus(session: ClaudeSession) -> Bool {
-        // 0: if the store already mapped a terminal to this session, use it directly.
+        // 0: pre,mapped id from the store.
         if let tid = session.terminalId, focusTerminal(id: tid) { return true }
 
         let terminals = listTerminals()
+
+        // 1: deterministic match via aiTitle.
+        if let aiTitle = session.aiTitle, !aiTitle.isEmpty,
+           let t = terminals.first(where: { titleMatches($0.name, aiTitle: aiTitle) }),
+           focusTerminal(id: t.id) {
+            return true
+        }
+
         let byCwd = terminals.filter { $0.cwd == session.cwd }
         let needle = (session.name?.isEmpty == false) ? session.name! : session.windowSearchKey
 
-        // 1 & 2: cwd match, tie-break by title.
+        // 2: cwd match, tie,break by title.
         if !byCwd.isEmpty {
             let best = byCwd.first(where: { $0.name.contains(needle) }) ?? byCwd[0]
             if focusTerminal(id: best.id) { return true }
@@ -39,6 +48,19 @@ enum GhosttyBridge {
         // 4: give up and at least activate the app.
         activateApp()
         return false
+    }
+
+    /// See `SessionStore.titleMatches`: a Ghostty title matches an aiTitle if,
+    /// once the leading Braille spinner or `✳` glyph is stripped, the rest
+    /// equals (or starts with) the aiTitle.
+    private static func titleMatches(_ title: String, aiTitle: String) -> Bool {
+        var s = Substring(title)
+        if let first = s.unicodeScalars.first,
+           (0x2800...0x28FF).contains(first.value) || first.value == 0x2733 {
+            s = s.dropFirst()
+        }
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        return trimmed == aiTitle || trimmed.hasPrefix(aiTitle)
     }
 
     /// Enumerate every Ghostty terminal with its id, cwd and title.

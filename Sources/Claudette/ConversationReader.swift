@@ -48,6 +48,115 @@ enum ConversationReader {
         return nil
     }
 
+    /// Return the latest LLM,generated title for this session, or `nil` if
+    /// none has been produced yet (very short sessions, or sessions whose
+    /// JSON already carries an explicit `name`, in which case Claude Code
+    /// skips title generation).
+    ///
+    /// The transcript contains zero or more `{"type":"ai-title","aiTitle":"..."}`
+    /// entries; we keep the last one. Results are cached by file mtime so
+    /// re,reading the same unchanged transcript on each refresh is cheap.
+    static func aiTitle(for session: ClaudeSession) -> String? {
+        // Short,circuit: an explicit session name means Claude Code does not
+        // emit ai,title entries. Spares us reading a potentially huge JSONL
+        // on every refresh (long sessions can be hundreds of MB).
+        if let n = session.name, !n.isEmpty { return nil }
+
+        let path = transcriptPath(for: session)
+        let mtime = mtimeOf(path)
+
+        if let cached = cache.value(for: session.sessionId), cached.mtime == mtime {
+            return cached.title
+        }
+
+        let title = mtime == nil ? nil : readAiTitle(from: path)
+        cache.set(sessionId: session.sessionId, mtime: mtime, title: title)
+        return title
+    }
+
+    private static func transcriptPath(for session: ClaudeSession) -> String {
+        let slug = projectSlug(for: session.cwd)
+        return "\(NSHomeDirectory())/.claude/projects/\(slug)/\(session.sessionId).jsonl"
+    }
+
+    private static func mtimeOf(_ path: String) -> TimeInterval? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let date = attrs[.modificationDate] as? Date else { return nil }
+        return date.timeIntervalSince1970
+    }
+
+    /// Tail,read strategy: JSONL transcripts can grow to hundreds of MB on
+    /// long sessions, but Claude re,emits `ai-title` entries regularly. Read
+    /// the last 64 KB and expand exponentially up to 4 MB if no entry is
+    /// found, instead of loading the whole file each refresh.
+    private static func readAiTitle(from path: String) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+
+        let size: UInt64
+        do { size = try handle.seekToEnd() } catch { return nil }
+        if size == 0 { return nil }
+
+        var window: UInt64 = 64 * 1024
+        let maxWindow: UInt64 = 4 * 1024 * 1024
+
+        while true {
+            let from = size > window ? size - window : 0
+            do { try handle.seek(toOffset: from) } catch { return nil }
+            let data: Data
+            do { data = (try handle.readToEnd()) ?? Data() } catch { return nil }
+
+            // When the window starts mid,file, the first partial line (and any
+            // UTF,8 boundary cut) is dropped by skipping to the first newline.
+            var slice = data[...]
+            if from > 0, let nl = slice.firstIndex(of: 0x0A) {
+                slice = slice[(nl + 1)...]
+            }
+
+            if let title = lastAiTitleEntry(in: Data(slice)) {
+                return title
+            }
+
+            if from == 0 || window >= maxWindow { return nil }
+            window = min(window * 4, maxWindow)
+        }
+    }
+
+    private static func lastAiTitleEntry(in data: Data) -> String? {
+        guard let content = String(data: data, encoding: .utf8) else { return nil }
+        for line in content.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard let bytes = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                  obj["type"] as? String == "ai-title",
+                  let t = (obj["aiTitle"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !t.isEmpty else {
+                continue
+            }
+            return t
+        }
+        return nil
+    }
+
+    /// Thread,safe cache keyed by sessionId, invalidated by file mtime.
+    /// Accessed from SessionStore on @MainActor, but we keep the lock so the
+    /// type stays safe to call from anywhere.
+    private final class AiTitleCache: @unchecked Sendable {
+        struct Entry { let mtime: TimeInterval?; let title: String? }
+        private let lock = NSLock()
+        private var entries: [String: Entry] = [:]
+
+        func value(for sessionId: String) -> Entry? {
+            lock.lock(); defer { lock.unlock() }
+            return entries[sessionId]
+        }
+        func set(sessionId: String, mtime: TimeInterval?, title: String?) {
+            lock.lock(); defer { lock.unlock() }
+            entries[sessionId] = Entry(mtime: mtime, title: title)
+        }
+    }
+    private static let cache = AiTitleCache()
+
     /// Project path encoding used by Claude Code: every non-alphanumeric
     /// character is replaced by '-' (two consecutive non-alnum characters
     /// yield '--').

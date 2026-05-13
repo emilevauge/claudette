@@ -50,9 +50,10 @@ final class SessionStore: ObservableObject {
         var alive: [ClaudeSession] = []
         for name in names where name.hasSuffix(".json") {
             let path = "\(sessionsDir)/\(name)"
-            guard let session = Self.parse(path: path), Self.isAlive(pid: session.pid) else {
+            guard var session = Self.parse(path: path), Self.isAlive(pid: session.pid) else {
                 continue
             }
+            session.aiTitle = ConversationReader.aiTitle(for: session)
             alive.append(session)
         }
 
@@ -88,7 +89,10 @@ final class SessionStore: ObservableObject {
     }
 
     /// Find the Ghostty terminal matching a session.
-    /// 1) match by normalized cwd
+    /// 0) if we know the `aiTitle`, match by exact suffix: Claude Code injects
+    ///    `<spinner|✳> <aiTitle>` into the tab title verbatim, so this is a
+    ///    deterministic match with no false positives.
+    /// 1) otherwise, match by normalized cwd.
     /// 2) if several candidates, prefer those whose title starts with a Braille
     ///    spinner (busy) or `✳` (idle): that's a Claude terminal, not a plain
     ///    shell that happens to share the same directory.
@@ -100,6 +104,15 @@ final class SessionStore: ObservableObject {
         _ session: ClaudeSession,
         with terminals: [GhosttyBridge.GhosttyTerminal]
     ) -> ClaudeSession {
+        // Step 0: deterministic match via aiTitle when available.
+        if let aiTitle = session.aiTitle, !aiTitle.isEmpty,
+           let t = terminals.first(where: { titleMatches($0.name, aiTitle: aiTitle) }) {
+            var s = session
+            s.terminalTitle = t.name
+            s.terminalId = t.id
+            return s
+        }
+
         let needle = (session.name?.isEmpty == false) ? session.name! : session.windowSearchKey
         let sessionCwd = normalize(session.cwd)
 
@@ -119,6 +132,20 @@ final class SessionStore: ObservableObject {
         s.terminalTitle = t.name
         s.terminalId = t.id
         return s
+    }
+
+    /// A Ghostty title matches an aiTitle if, after trimming the leading
+    /// Braille spinner or `✳` glyph plus whitespace, it equals the aiTitle.
+    /// We tolerate Claude appending a status suffix in the future by using
+    /// `hasPrefix` rather than equality.
+    private static func titleMatches(_ title: String, aiTitle: String) -> Bool {
+        var s = Substring(title)
+        if let first = s.unicodeScalars.first,
+           (0x2800...0x28FF).contains(first.value) || first.value == 0x2733 {
+            s = s.dropFirst()
+        }
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        return trimmed == aiTitle || trimmed.hasPrefix(aiTitle)
     }
 
     private static func normalize(_ path: String) -> String {

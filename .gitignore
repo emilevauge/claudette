@@ -7,3 +7,4 @@ Claudette.app/
 .DS_Store
 Claudette.app.zip
 *.dmg
+.claude/settings.local.json
