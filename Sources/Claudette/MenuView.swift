@@ -4,14 +4,15 @@ import AppKit
 struct MenuView: View {
     @ObservedObject var store: SessionStore
 
-    @Environment(\.openSettings) private var openSettingsEnv
-
     @State private var searchText: String = ""
     @State private var selectedIndex: Int = 0
+    @State private var showingSettings: Bool = false
     @FocusState private var searchFocused: Bool
 
-    /// List max height, persisted across launches (configured in Settings).
-    @AppStorage("listMaxHeight") private var listMaxHeight: Double = 380
+    /// List max height. Hardcoded to a tall ceiling; the popover itself
+    /// is otherwise compact and the system never lets it exceed the
+    /// screen height.
+    private let listMaxHeight: CGFloat = 1400
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -129,7 +130,7 @@ struct MenuView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: CGFloat(listMaxHeight))
+                .frame(maxHeight: listMaxHeight)
                 .onChange(of: selectedIndex) { _, newIndex in
                     guard filtered.indices.contains(newIndex) else { return }
                     withAnimation(.easeInOut(duration: 0.1)) {
@@ -157,9 +158,15 @@ struct MenuView: View {
             .keyboardShortcut("r")
 
             iconButton("gearshape", tooltip: L("Settings…")) {
-                openSettings()
+                showingSettings.toggle()
             }
             .keyboardShortcut(",")
+            // `arrowEdge: .trailing` anchors the popover's arrow to the
+            // gear button's trailing edge, putting the settings panel to
+            // the right of the button.
+            .popover(isPresented: $showingSettings, arrowEdge: .trailing) {
+                SettingsView()
+            }
 
             Spacer()
 
@@ -186,13 +193,6 @@ struct MenuView: View {
         }
         .buttonStyle(.plain)
         .help(tooltip)
-    }
-
-    private func openSettings() {
-        AppDelegate.shared.closePopover()
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        openSettingsEnv()
     }
 
     // MARK: actions
@@ -266,6 +266,10 @@ private struct SessionRow: View {
                     }
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+
+                    if let fraction = session.contextFraction {
+                        contextBar(fraction: fraction)
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -351,6 +355,34 @@ private struct SessionRow: View {
                 .foregroundStyle(Color(red: 0.80, green: 0.20, blue: 0.18))
         case .idle:
             EmptyView()
+        }
+    }
+
+    /// Thin context,fill bar shown at the bottom of each row. Color
+    /// shifts green → yellow → orange → red as the model's context window
+    /// fills up. Tooltip surfaces the exact percentage.
+    @ViewBuilder
+    private func contextBar(fraction: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.tertiary.opacity(0.25))
+                Capsule()
+                    .fill(Self.contextColor(for: fraction))
+                    .frame(width: max(2, geo.size.width * fraction))
+            }
+        }
+        .frame(height: 3.5)
+        .padding(.top, 1)
+        .help(String(format: "context: %.0f%%", fraction * 100))
+    }
+
+    private static func contextColor(for fraction: Double) -> Color {
+        switch fraction {
+        case ..<0.50: return Color(red: 0.20, green: 0.78, blue: 0.35)  // green
+        case ..<0.75: return Color(red: 0.95, green: 0.75, blue: 0.10)  // yellow
+        case ..<0.90: return Color(red: 1.00, green: 0.58, blue: 0.00)  // orange
+        default:      return Color(red: 0.92, green: 0.26, blue: 0.21)  // red
         }
     }
 

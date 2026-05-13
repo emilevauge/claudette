@@ -20,6 +20,12 @@ struct ClaudeSession: Identifiable, Hashable {
     /// matching key when annotating with a Ghostty terminal.
     var aiTitle: String?
 
+    /// Context window fill (0..1), read straight from the status JSON
+    /// Claude Code writes for the status line (`used_percentage` divided
+    /// by 100). `nil` when the side,channel file hasn't been produced
+    /// yet, or the user opted out of the integration.
+    var contextFraction: Double?
+
     /// Populated by SessionStore when we manage to match a Ghostty terminal.
     /// This is our source of truth for `isBusy` because Claude refreshes the
     /// terminal title on every spinner tick.

@@ -54,6 +54,7 @@ final class SessionStore: ObservableObject {
                 continue
             }
             session.aiTitle = ConversationReader.aiTitle(for: session)
+            session.contextFraction = ConversationReader.contextFraction(for: session)
             alive.append(session)
         }
 

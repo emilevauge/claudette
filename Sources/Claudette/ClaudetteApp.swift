@@ -21,14 +21,15 @@ struct ClaudetteApp: App {
     }
 
     var body: some Scene {
-        // SwiftUI requires at least one scene. The Settings scene is hidden
-        // until the user explicitly opens "Settings…".
-        Settings {
-            SettingsView()
-                .onDisappear {
-                    // Back to accessory to hide the Dock icon.
-                    NSApp.setActivationPolicy(.accessory)
-                }
-        }
+        // SwiftUI requires at least one Scene, but the real Settings UI
+        // lives in a popover anchored to the gear button inside the menu
+        // bar popover. This Scene exists only to satisfy that
+        // requirement; the empty `CommandGroup(replacing: .appSettings)`
+        // removes the system "Settings…" menu entry and its default
+        // ⌘, shortcut so the empty Settings window is never reachable.
+        Settings { EmptyView() }
+            .commands {
+                CommandGroup(replacing: .appSettings) { }
+            }
     }
 }

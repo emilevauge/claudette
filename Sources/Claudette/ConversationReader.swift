@@ -74,6 +74,24 @@ enum ConversationReader {
         return title
     }
 
+    /// Read the context window fill ratio (0..1) from the per,session
+    /// sidecar that the user's status,line command exposes at
+    /// `/tmp/claudette/<sessionId>.json`. The JSON layout is what Claude
+    /// Code itself feeds to the status line, and includes a precomputed
+    /// `context_window.used_percentage`. Returns `nil` when the sidecar
+    /// is missing (status line not yet invoked for this session, or not
+    /// configured to write the sidecar).
+    static func contextFraction(for session: ClaudeSession) -> Double? {
+        let path = "/tmp/claudette/\(session.sessionId).json"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cw = obj["context_window"] as? [String: Any],
+              let pct = cw["used_percentage"] as? Double else {
+            return nil
+        }
+        return max(0, min(1, pct / 100.0))
+    }
+
     private static func transcriptPath(for session: ClaudeSession) -> String {
         let slug = projectSlug(for: session.cwd)
         return "\(NSHomeDirectory())/.claude/projects/\(slug)/\(session.sessionId).jsonl"
