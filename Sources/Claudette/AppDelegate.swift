@@ -49,8 +49,9 @@ final class AppDelegate: NSObject, ObservableObject {
         observeSessions()
         setupHotkey()
 
-        // Background check for a newer release on GitHub.
-        UpdateChecker.checkInBackground()
+        // Background check for a newer release on GitHub: at launch, then
+        // every 24h while the app is running, plus a re,check on wake.
+        UpdateChecker.startPeriodicCheck()
     }
 
     // MARK: status item

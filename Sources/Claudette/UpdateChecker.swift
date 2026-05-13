@@ -15,6 +15,13 @@ enum UpdateChecker {
     private static let owner = "emilevauge"
     private static let repo = "claudette"
 
+    /// Minimum delay between two successful background checks.
+    private static let checkIntervalSeconds: TimeInterval = 24 * 60 * 60
+    private static let lastCheckedAtKey = "lastUpdateCheckedAt"
+
+    /// Hold the recurring timer alive across the app's lifetime.
+    private static var periodicTimer: Timer?
+
     /// Outcome of a manual check, surfaced to the Settings UI.
     enum ManualResult {
         case upToDate(current: String)
@@ -26,14 +33,52 @@ enum UpdateChecker {
     /// the comparison base.
     static func currentVersionString() -> String { currentVersion() }
 
-    /// Run the background check at startup. Silently ignores network errors.
-    static func checkInBackground() {
+    /// Arm the launch,time check and a 24h recurring check, plus a re,check
+    /// on wake from sleep (the Timer doesn't tick while macOS is asleep, so
+    /// a long sleep would otherwise skip a day). All paths share the same
+    /// `lastUpdateCheckedAt` cooldown so we never hammer the API on rapid
+    /// restarts or back,to,back wake events.
+    static func startPeriodicCheck() {
         // Skip when not in a .app bundle (raw SPM binary: no reliable version).
         guard Bundle.main.bundleIdentifier != nil else { return }
 
-        Task.detached(priority: .background) {
-            await runBackgroundCheck()
+        triggerInBackground()
+
+        periodicTimer?.invalidate()
+        let timer = Timer(timeInterval: checkIntervalSeconds, repeats: true) { _ in
+            triggerInBackground()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        periodicTimer = timer
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            triggerInBackground()
+        }
+    }
+
+    /// `nonisolated` so the Timer and NSWorkspace wake observer (which run
+    /// on the main thread but in nonisolated closures) can call it directly.
+    /// The body only spawns a detached task that hops to main via `await`.
+    nonisolated private static func triggerInBackground() {
+        Task.detached(priority: .background) {
+            await maybeRunBackgroundCheck()
+        }
+    }
+
+    /// Honour the 24h cooldown to avoid hammering GitHub on rapid restarts
+    /// or back,to,back wake events.
+    private static func maybeRunBackgroundCheck() async {
+        let now = Date()
+        if let last = UserDefaults.standard.object(forKey: lastCheckedAtKey) as? Date,
+           now.timeIntervalSince(last) < checkIntervalSeconds {
+            return
+        }
+        UserDefaults.standard.set(now, forKey: lastCheckedAtKey)
+        await runBackgroundCheck()
     }
 
     /// Synchronous,style check for the Settings panel. Always returns a
