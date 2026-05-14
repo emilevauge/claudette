@@ -26,6 +26,15 @@ struct ClaudeSession: Identifiable, Hashable {
     /// yet, or the user opted out of the integration.
     var contextFraction: Double?
 
+    /// JSONL-derived override for `phase` : `true` when the transcript
+    /// shows Claude has an unresolved `tool_use` (an `AskUserQuestion`,
+    /// or another tool whose result hasn't landed within ~5 s, which in
+    /// practice means Claude Code is showing a permission prompt). Set by
+    /// SessionStore on each refresh. Overrides a stale `status: "busy"`
+    /// from `~/.claude/sessions/<pid>.json` — Claude Code v2.1.141 leaves
+    /// that field at "busy" during AskUserQuestion / permission prompts.
+    var blockedOnUser: Bool = false
+
     /// Populated by SessionStore when we manage to match a Ghostty terminal.
     /// This is our source of truth for `isBusy` because Claude refreshes the
     /// terminal title on every spinner tick.
@@ -47,19 +56,24 @@ struct ClaudeSession: Identifiable, Hashable {
     }
 
     /// The Claude Code daemon writes the session JSON with three observed
-    /// `status` values, updated in real,time (the JSONL transcript is too
-    /// heavily buffered to be reliable for live state) :
-    ///   - "busy"    : the model is producing output.
+    /// `status` values :
+    ///   - "busy"    : the model is producing output (in theory).
     ///   - "waiting" : the CLI is blocked on a user response, either a
     ///                 structured `AskUserQuestion` or a permission prompt.
     ///   - "idle"    : the turn is fully wrapped up, plain `>` prompt.
-    /// We map them directly. Anything unrecognised (including `null` for
-    /// Claude Desktop agents) falls back to the title,based busy detection.
+    ///
+    /// In practice (Claude Code v2.1.141) `status` sometimes stays at
+    /// "busy" while the CLI is actually showing an AskUserQuestion or a
+    /// permission prompt : the field is no longer authoritative for that
+    /// transition. So we cross-check with `blockedOnUser`, derived from
+    /// the JSONL transcript, which DOES contain the pending tool_use
+    /// entry the moment Claude emits it. `blockedOnUser` overrides a
+    /// "busy" status; `status: "waiting"` is still trusted on its own.
     var phase: Phase {
         switch status {
-        case "busy":    return .busy
         case "waiting": return .needsAttention
         case "idle":    return .idle
+        case "busy":    return blockedOnUser ? .needsAttention : .busy
         default:        return isBusy ? .busy : .idle
         }
     }

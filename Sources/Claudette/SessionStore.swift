@@ -55,6 +55,7 @@ final class SessionStore: ObservableObject {
             }
             session.aiTitle = ConversationReader.aiTitle(for: session)
             session.contextFraction = ConversationReader.contextFraction(for: session)
+            session.blockedOnUser = ConversationReader.isBlockedOnUser(for: session)
             alive.append(session)
         }
 
