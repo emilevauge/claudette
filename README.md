@@ -38,6 +38,10 @@ open /Applications/Claudette.app
   <img src="docs/screenshot-settings.png" width="520" alt="Claudette settings panel anchored to the gear button"/>
 </p>
 
+## Known limitation
+
+**`AskUserQuestion` currently shows orange (thinking) instead of red (needs attention) on Claude Code v2.1.138 and later**, until the upstream fix lands. The session JSONL no longer flushes the question event before the user responds, and `~/.claude/sessions/<pid>.json` keeps `status: "busy"` instead of flipping to `"waiting"`, so Claudette has no reliable signal for the pending question and the dot stays orange. Tracked at [anthropics/claude-code#58463](https://github.com/anthropics/claude-code/issues/58463). We tried a local JSONL workaround in 0.5.6 and reverted it in 0.5.7 because the heuristic produced too many false positives on long-running foreground tools. Once Anthropic ships the fix, the existing `status: "waiting"` detection picks it up automatically, no Claudette update needed.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later, tested on macOS 26 (Sequoia).
