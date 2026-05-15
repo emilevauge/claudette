@@ -26,6 +26,14 @@ struct ClaudeSession: Identifiable, Hashable {
     /// yet, or the user opted out of the integration.
     var contextFraction: Double?
 
+    /// True when the JSONL shows an unresolved background tool call : a
+    /// subagent (`Agent`) or a `Bash` with `run_in_background: true`.
+    /// Claude Code flips `status` back to "idle" / "shell" as soon as
+    /// the main turn ends, even while the background task is still
+    /// running, so the field alone misses these. Populated by
+    /// SessionStore on each refresh.
+    var hasBackgroundWork: Bool = false
+
     /// Populated by SessionStore when we manage to match a Ghostty terminal.
     /// This is our source of truth for `isBusy` because Claude refreshes the
     /// terminal title on every spinner tick.
@@ -46,21 +54,31 @@ struct ClaudeSession: Identifiable, Hashable {
         case idle
     }
 
-    /// The Claude Code daemon writes the session JSON with three observed
-    /// `status` values, updated in real,time (the JSONL transcript is too
-    /// heavily buffered to be reliable for live state) :
+    /// Observed `status` values from `~/.claude/sessions/<pid>.json` :
     ///   - "busy"    : the model is producing output.
     ///   - "waiting" : the CLI is blocked on a user response, either a
     ///                 structured `AskUserQuestion` or a permission prompt.
     ///   - "idle"    : the turn is fully wrapped up, plain `>` prompt.
+    ///   - "shell"   : the main turn ended, but Claude Code is still
+    ///                 keeping state (often correlates with a background
+    ///                 task still running). Treated like "idle" except
+    ///                 that `hasBackgroundWork` is allowed to bump us to
+    ///                 .busy.
     /// We map them directly. Anything unrecognised (including `null` for
     /// Claude Desktop agents) falls back to the title,based busy detection.
+    ///
+    /// `hasBackgroundWork` is an additional override : when true and the
+    /// status reports nothing active (idle / shell / unknown), the row
+    /// shows .busy so the user sees the session has work in flight.
     var phase: Phase {
         switch status {
         case "busy":    return .busy
         case "waiting": return .needsAttention
-        case "idle":    return .idle
-        default:        return isBusy ? .busy : .idle
+        case "idle":    return hasBackgroundWork ? .busy : .idle
+        case "shell":   return hasBackgroundWork ? .busy : .idle
+        default:
+            if hasBackgroundWork { return .busy }
+            return isBusy ? .busy : .idle
         }
     }
 

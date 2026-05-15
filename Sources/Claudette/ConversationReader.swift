@@ -74,6 +74,55 @@ enum ConversationReader {
         return title
     }
 
+    /// True iff a background task (a subagent or a `Bash` with
+    /// `run_in_background: true`) is currently writing output for this
+    /// session. Claude Code does NOT keep the session JSON `status`
+    /// field at "busy" while these run : `status` flips to "idle" or
+    /// "shell" as soon as the main turn ends, even when a 25-minute
+    /// `go test` is still running detached.
+    ///
+    /// The signal we use is the mtime of `*.output` files under
+    /// `/tmp/claude-<uid>/<cwd-slug>/<harness-id>/tasks/`. The harness
+    /// writes background tool stdout there as it streams, so a
+    /// recently-modified file means the task is still producing output.
+    /// We deliberately do NOT scan the JSONL transcript : Claude Code
+    /// emits the `tool_result` for these tools immediately on launch
+    /// (with just a task ID), not on completion, so every background
+    /// `tool_use` appears resolved in the JSONL the moment it's issued.
+    ///
+    /// Limitations : a background bash that pauses for more than
+    /// `staleThreshold` seconds (a slow compile, an API call) gets
+    /// missed until output resumes. Acceptable trade-off : during such
+    /// pauses there's nothing to show anyway, and the alternative
+    /// (process-table inspection) is much heavier to do every 2 s.
+    static func hasBackgroundWork(for session: ClaudeSession,
+                                  staleThreshold: TimeInterval = 5.0) -> Bool {
+        let slug = projectSlug(for: session.cwd)
+        let root = "/tmp/claude-\(getuid())/\(slug)"
+        let fm = FileManager.default
+        guard let harnessDirs = try? fm.contentsOfDirectory(atPath: root) else {
+            return false
+        }
+        let now = Date().timeIntervalSince1970
+        for harnessDir in harnessDirs {
+            let tasksDir = "\(root)/\(harnessDir)/tasks"
+            guard let entries = try? fm.contentsOfDirectory(atPath: tasksDir) else {
+                continue
+            }
+            for entry in entries where entry.hasSuffix(".output") {
+                let filePath = "\(tasksDir)/\(entry)"
+                guard let attrs = try? fm.attributesOfItem(atPath: filePath),
+                      let mdate = attrs[.modificationDate] as? Date else {
+                    continue
+                }
+                if now - mdate.timeIntervalSince1970 < staleThreshold {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     /// Read the context window fill ratio (0..1) from the per,session
     /// sidecar that the user's status,line command exposes at
     /// `/tmp/claudette/<sessionId>.json`. The JSON layout is what Claude
