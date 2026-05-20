@@ -345,18 +345,45 @@ private struct SessionRow: View {
 
     @ViewBuilder
     private var statusLabel: some View {
-        switch session.phase {
-        case .busy:
-            Text(L("thinking…"))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(Color(red: 0.95, green: 0.45, blue: 0.00))
-        case .needsAttention:
-            Text(L("needs attention"))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(Color(red: 0.80, green: 0.20, blue: 0.18))
-        case .idle:
-            EmptyView()
+        HStack(spacing: 4) {
+            switch session.phase {
+            case .busy:
+                Text(L("thinking…"))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Color(red: 0.95, green: 0.45, blue: 0.00))
+            case .needsAttention:
+                Text(L("needs attention"))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Color(red: 0.80, green: 0.20, blue: 0.18))
+            case .idle:
+                EmptyView()
+            }
+            subagentCounter
         }
+    }
+
+    /// Tiny inline counter showing how many subagents are actively writing
+    /// to their transcript. `↳ N` next to the status label, tertiary color
+    /// so it doesn't compete with the main status text. Hover tooltip
+    /// surfaces `agentType: description` for each.
+    @ViewBuilder
+    private var subagentCounter: some View {
+        if !session.activeSubagents.isEmpty {
+            Text("· ▶ \(session.activeSubagents.count)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .help(subagentTooltip)
+        }
+    }
+
+    private var subagentTooltip: String {
+        let lines: [String] = session.activeSubagents.map {
+            $0.description.isEmpty ? $0.agentType : "\($0.agentType): \($0.description)"
+        }
+        let header = session.activeSubagents.count == 1
+            ? L("1 active subagent")
+            : L("\(session.activeSubagents.count) active subagents")
+        return ([header] + lines.map { "• " + $0 }).joined(separator: "\n")
     }
 
     /// Thin context,fill bar shown at the bottom of each row. Color

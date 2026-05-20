@@ -34,6 +34,12 @@ struct ClaudeSession: Identifiable, Hashable {
     /// SessionStore on each refresh.
     var hasBackgroundWork: Bool = false
 
+    /// Subagents whose transcript is being actively written (mtime within
+    /// the last few seconds). Drives the inline counter next to the
+    /// status label and the hover tooltip listing each agent's type and
+    /// description. Populated by SessionStore on each refresh.
+    var activeSubagents: [ActiveSubagent] = []
+
     /// Populated by SessionStore when we manage to match a Ghostty terminal.
     /// This is our source of truth for `isBusy` because Claude refreshes the
     /// terminal title on every spinner tick.
@@ -106,4 +112,13 @@ struct ClaudeSession: Identifiable, Hashable {
         }
         return status == "busy"
     }
+}
+
+/// One subagent currently writing to its transcript. We surface the type
+/// (`general-purpose`, `code-reviewer`, ...) and the short description
+/// Claude provided when spawning it, so the user can tell at a glance
+/// what each running agent is doing.
+struct ActiveSubagent: Hashable {
+    let agentType: String
+    let description: String
 }

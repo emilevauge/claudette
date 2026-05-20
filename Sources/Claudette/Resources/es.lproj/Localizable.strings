@@ -35,3 +35,5 @@
 "License" = "Licencia";
 "Source" = "Código fuente";
 "© 2026 Emile Vauge. Released under the MIT License." = "© 2026 Emile Vauge. Publicado bajo la licencia MIT.";
+"1 active subagent" = "1 subagente activo";
+"%lld active subagents" = "%lld subagentes activos";

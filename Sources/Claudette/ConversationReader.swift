@@ -123,6 +123,114 @@ enum ConversationReader {
         return false
     }
 
+    /// List of subagents currently writing to their transcript. Each
+    /// session's `Agent` tool invocations create
+    /// `~/.claude/projects/<slug>/<sessionId>/subagents/agent-<hash>.jsonl`
+    /// (the transcript) plus a sibling `agent-<hash>.meta.json` carrying
+    /// `agentType` and `description`. The transcript file is appended
+    /// to while the subagent runs and gets a final assistant entry with
+    /// `stop_reason: "end_turn"` (or `stop_sequence`) when it returns.
+    ///
+    /// Two-tier liveness check :
+    ///  - **Fast path** : mtime within `recentMtimeWindow` (5 s)
+    ///    → certainly still writing, no I/O needed beyond `stat`.
+    ///  - **Slow path** : mtime older than that → tail-read the last
+    ///    16 KB and look at the most recent `assistant` entry's
+    ///    `stop_reason`. `end_turn` / `stop_sequence` means the agent
+    ///    has reported a clean completion ; anything else (or no
+    ///    assistant entry in the tail at all) means it's still alive
+    ///    (between tool calls, deep in thinking, etc.). A subagent
+    ///    thinking for 30+ seconds without writing therefore stays
+    ///    counted, instead of flickering out of the UI.
+    ///  - **Absolute staleness** : files untouched for more than
+    ///    `absoluteStaleness` (1 h) are skipped without reading, in
+    ///    case a long-dead agent never wrote a completion marker (the
+    ///    process was killed, the machine slept, ...) and would
+    ///    otherwise linger forever.
+    static func activeSubagents(for session: ClaudeSession) -> [ActiveSubagent] {
+        let slug = projectSlug(for: session.cwd)
+        let dir = "\(NSHomeDirectory())/.claude/projects/\(slug)/\(session.sessionId)/subagents"
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+
+        let now = Date().timeIntervalSince1970
+        let recentMtimeWindow: TimeInterval = 5.0
+        let absoluteStaleness: TimeInterval = 3600.0
+        var result: [ActiveSubagent] = []
+
+        for entry in entries where entry.hasSuffix(".jsonl") {
+            let jsonlPath = "\(dir)/\(entry)"
+            guard let attrs = try? fm.attributesOfItem(atPath: jsonlPath),
+                  let mdate = attrs[.modificationDate] as? Date else { continue }
+            let age = now - mdate.timeIntervalSince1970
+
+            if age > absoluteStaleness { continue }
+            if age >= recentMtimeWindow {
+                // Slow path : if the tail shows a clean completion we
+                // skip this agent ; otherwise we keep it as active.
+                if subagentHasCompleted(at: jsonlPath) { continue }
+            }
+
+            // Pair with the meta.json. Falls back to a generic
+            // "agent" / empty description if the meta is missing or unreadable.
+            let metaPath = jsonlPath.replacingOccurrences(of: ".jsonl",
+                                                          with: ".meta.json")
+            var agentType = "agent"
+            var description = ""
+            if let metaData = try? Data(contentsOf: URL(fileURLWithPath: metaPath)),
+               let obj = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {
+                agentType = (obj["agentType"] as? String) ?? agentType
+                description = (obj["description"] as? String) ?? description
+            }
+            result.append(ActiveSubagent(agentType: agentType,
+                                         description: description))
+        }
+        return result
+    }
+
+    /// Tail-read the last 16 KB of a subagent's JSONL and return true
+    /// iff the most recent `assistant` entry has a `stop_reason` of
+    /// `end_turn` or `stop_sequence` (a clean completion). Returns
+    /// false when no assistant entry is found in the tail (still
+    /// thinking or mid tool-call), when the file can't be opened, or
+    /// when the JSON is unparseable.
+    private static func subagentHasCompleted(at path: String) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        defer { try? handle.close() }
+
+        let size: UInt64
+        do { size = try handle.seekToEnd() } catch { return false }
+        if size == 0 { return false }
+
+        // 16 KB tail is plenty : the final assistant turn (often a
+        // short text plus end_turn marker) fits in a few KB. We don't
+        // grow the window beyond that because the slow path is hit on
+        // every refresh for every quiet subagent, and the answer is
+        // either "right at the end" or doesn't matter (we'd default
+        // to active = keep showing).
+        let window: UInt64 = 16 * 1024
+        let from = size > window ? size - window : 0
+        do { try handle.seek(toOffset: from) } catch { return false }
+        let data: Data = (try? handle.readToEnd()) ?? Data()
+
+        var slice = data[...]
+        if from > 0, let nl = slice.firstIndex(of: 0x0A) {
+            slice = slice[(nl + 1)...]
+        }
+        guard let content = String(data: Data(slice), encoding: .utf8) else { return false }
+
+        for line in content.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard let bytes = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                  obj["type"] as? String == "assistant",
+                  let msg = obj["message"] as? [String: Any],
+                  let stop = msg["stop_reason"] as? String
+            else { continue }
+            return stop == "end_turn" || stop == "stop_sequence"
+        }
+        return false
+    }
+
     /// Read the context window fill ratio (0..1) from the per,session
     /// sidecar that the user's status,line command exposes at
     /// `/tmp/claudette/<sessionId>.json`. The JSON layout is what Claude
