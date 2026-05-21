@@ -245,7 +245,7 @@ private struct SessionRow: View {
                             .help(aiTitle)
                     }
 
-                    Text(prettyPath(session.cwd))
+                    boldedPath(session.cwd)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -274,8 +274,11 @@ private struct SessionRow: View {
 
                 Spacer(minLength: 0)
 
-                appAffordance
-                    .padding(.top, 4)
+                HStack(spacing: 8) {
+                    remoteControlButton
+                    appAffordance
+                }
+                .padding(.top, 4)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
@@ -314,6 +317,30 @@ private struct SessionRow: View {
         case .needsAttention: return red
         case .idle:           return green
         }
+    }
+
+    /// Small antenna icon that types `/remote-control` into the session's
+    /// Ghostty terminal so the user can scan the resulting QR code with
+    /// the Claude mobile app. Faded and unclickable for Claude Desktop
+    /// background agents, which have no terminal of their own. When
+    /// remote control is already active for the session (inferred from
+    /// `bridgeSessionId` in the session JSON), the icon takes the accent
+    /// color and the tooltip reflects the live state.
+    @ViewBuilder
+    private var remoteControlButton: some View {
+        let active = session.isRemoteControlActive
+        Button {
+            RemoteControlActivator.enable(session: session)
+        } label: {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.caption)
+                .foregroundStyle(active ? AnyShapeStyle(Color.accentColor)
+                                        : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+        }
+        .buttonStyle(.plain)
+        .disabled(session.isClaudeDesktop)
+        .opacity(session.isClaudeDesktop ? 0.3 : 1.0)
+        .help(active ? L("Remote control active") : L("Enable remote control"))
     }
 
     /// Right,side affordance: the real .app icon of the target (Ghostty
@@ -427,6 +454,23 @@ private struct SessionRow: View {
             return "~" + path.dropFirst(home.count)
         }
         return path
+    }
+
+    /// Same as `prettyPath`, but returns a `Text` whose last path
+    /// component (the current directory's basename) is bold. So
+    /// `~/go/src/github.com/traefik/ingress-nginx-migration` reads as
+    /// `~/go/src/github.com/traefik/` + **`ingress-nginx-migration`**.
+    /// Lets the row's path catch the eye at a glance without growing
+    /// vertically, even when truncated from the head.
+    private func boldedPath(_ rawPath: String) -> Text {
+        let pretty = prettyPath(rawPath)
+        guard let lastSlash = pretty.lastIndex(of: "/") else {
+            return Text(pretty).bold()
+        }
+        let after = pretty.index(after: lastSlash)
+        let parent = String(pretty[..<after])
+        let basename = String(pretty[after...])
+        return Text(parent) + Text(basename).bold()
     }
 
     /// Elapsed time since the session started: "2d 3h", "1h 23m", "12m".

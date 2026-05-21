@@ -188,7 +188,8 @@ final class SessionStore: ObservableObject {
             status: raw["status"] as? String ?? "",
             kind: raw["kind"] as? String ?? "",
             entrypoint: raw["entrypoint"] as? String ?? "",
-            name: raw["name"] as? String
+            name: raw["name"] as? String,
+            bridgeSessionId: raw["bridgeSessionId"] as? String
         )
     }
 

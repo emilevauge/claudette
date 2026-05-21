@@ -13,6 +13,14 @@ struct ClaudeSession: Identifiable, Hashable {
     let entrypoint: String
     let name: String?
 
+    /// Anthropic-side session identifier set by Claude Code when the
+    /// CLI is bridged to claude.ai/code (i.e. `/remote-control` has
+    /// been activated). Present in `~/.claude/sessions/<pid>.json`
+    /// as `bridgeSessionId`, absent otherwise. We use the mere
+    /// presence as a "remote control is currently on" signal to
+    /// recolor the antenna affordance in the row.
+    let bridgeSessionId: String?
+
     /// Latest LLM,generated title for this session, read from the JSONL
     /// transcript (`{"type":"ai-title","aiTitle":"..."}` entries). This is
     /// exactly the string Claude Code injects into the Ghostty tab title
@@ -52,6 +60,15 @@ struct ClaudeSession: Identifiable, Hashable {
     /// than an interactive `claude` CLI invocation in a terminal. Routed to
     /// `ClaudeDesktopBridge` for focus; never matched against Ghostty.
     var isClaudeDesktop: Bool { entrypoint == "claude-desktop" }
+
+    /// True when `/remote-control` has been activated on this session,
+    /// inferred from the presence of `bridgeSessionId` in the session
+    /// JSON. The UI swaps the antenna icon to its active color when
+    /// this is true.
+    var isRemoteControlActive: Bool {
+        guard let id = bridgeSessionId else { return false }
+        return !id.isEmpty
+    }
 
     /// Effective phase. The UI maps this to color, label and pulse.
     enum Phase {

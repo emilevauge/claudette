@@ -37,3 +37,5 @@
 "© 2026 Emile Vauge. Released under the MIT License." = "© 2026 Emile Vauge. Publié sous licence MIT.";
 "1 active subagent" = "1 sous-agent actif";
 "%lld active subagents" = "%lld sous-agents actifs";
+"Enable remote control" = "Activer le contrôle distant";
+"Remote control active" = "Contrôle distant actif";
