@@ -168,7 +168,25 @@ enum ConversationReader {
             if age >= recentMtimeWindow {
                 // Slow path : if the tail shows a clean completion we
                 // skip this agent ; otherwise we keep it as active.
-                if subagentHasCompleted(at: jsonlPath) { continue }
+                // Mtime-keyed cache : as long as the file isn't being
+                // written to, the answer doesn't change, so we never
+                // re-tail-read once we've determined an agent is done.
+                // Critical for sessions that accumulate dozens of
+                // historical subagents (the security-advisor pipeline
+                // and similar) — otherwise every refresh re-reads
+                // 16 KB per agent and blocks the UI.
+                let mtime = mdate.timeIntervalSince1970
+                let completed: Bool
+                if let cached = subagentCompletionCache.value(for: jsonlPath,
+                                                              mtime: mtime) {
+                    completed = cached
+                } else {
+                    completed = subagentHasCompleted(at: jsonlPath)
+                    subagentCompletionCache.set(path: jsonlPath,
+                                                mtime: mtime,
+                                                completed: completed)
+                }
+                if completed { continue }
             }
 
             // Pair with the meta.json. Falls back to a generic
@@ -331,6 +349,29 @@ enum ConversationReader {
         }
     }
     private static let cache = AiTitleCache()
+
+    /// Same idea, for the subagent transcript completion check. Key is
+    /// the absolute jsonl path. Once we've confirmed an agent ended
+    /// cleanly (or hasn't), the answer stays the same until the file
+    /// is appended to again, which changes its mtime and invalidates
+    /// the entry. Cuts the tail-read cost on heavy sessions to ~zero
+    /// after the first refresh.
+    private final class SubagentCompletionCache: @unchecked Sendable {
+        struct Entry { let mtime: TimeInterval; let completed: Bool }
+        private let lock = NSLock()
+        private var entries: [String: Entry] = [:]
+
+        func value(for path: String, mtime: TimeInterval) -> Bool? {
+            lock.lock(); defer { lock.unlock() }
+            guard let e = entries[path], e.mtime == mtime else { return nil }
+            return e.completed
+        }
+        func set(path: String, mtime: TimeInterval, completed: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            entries[path] = Entry(mtime: mtime, completed: completed)
+        }
+    }
+    private static let subagentCompletionCache = SubagentCompletionCache()
 
     /// Project path encoding used by Claude Code: every non-alphanumeric
     /// character is replaced by '-' (two consecutive non-alnum characters

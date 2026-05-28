@@ -15,8 +15,16 @@ final class SessionStore: ObservableObject {
     private let sessionsDir: String
     private let pollInterval: TimeInterval
 
-    /// Sessions that were busy at the previous refresh (by id).
-    private var previousBusy: Set<String> = []
+    /// Raw `status` field of each session at the previous refresh
+    /// (sessionId → status). We trigger the "session became idle"
+    /// notification only when the raw status field transitions from
+    /// `"busy"` to anything else, not when our derived `phase` toggles.
+    /// `hasBackgroundWork` (per the `/tmp/claude-<uid>/.../tasks/*.output`
+    /// mtime heuristic) flickers as subagents pause writing between
+    /// tool calls ; firing notifications off that produced a spurious
+    /// "Claude is waiting for input" alert every time a background
+    /// burst dipped for more than 5 seconds.
+    private var previousStatus: [String: String] = [:]
     /// First refresh: don't emit transitions on cold start.
     private var hasBootstrapped = false
 
@@ -73,15 +81,23 @@ final class SessionStore: ObservableObject {
             return a.updatedAt > b.updatedAt
         }
 
-        // Detect busy → non-busy transitions (covers both .idle and
-        // .needsAttention as "Claude wants you").
-        let currentBusy = Set(alive.filter { $0.phase == .busy }.map { $0.id })
+        // Detect `status: "busy"` → non-busy transitions on the raw
+        // session JSON field, not on our derived `phase`. The phase
+        // includes the `hasBackgroundWork` override which flickers as
+        // background subagents pause between writes ; basing
+        // notifications on it produced spurious alerts for sessions
+        // doing bursty parallel work. We notify when the actual main
+        // loop reports completion (status flips to `idle`, `waiting`
+        // or `shell`) and ignore the background-work flickering.
         if hasBootstrapped {
-            for s in alive where s.phase != .busy && previousBusy.contains(s.id) {
-                onSessionBecameIdle?(s)
+            for s in alive {
+                let prev = previousStatus[s.id] ?? ""
+                if prev == "busy", s.status != "busy", !s.status.isEmpty {
+                    onSessionBecameIdle?(s)
+                }
             }
         }
-        previousBusy = currentBusy
+        previousStatus = Dictionary(uniqueKeysWithValues: alive.map { ($0.id, $0.status) })
         hasBootstrapped = true
 
         sessions = alive
