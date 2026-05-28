@@ -97,7 +97,15 @@ final class SessionStore: ObservableObject {
                 }
             }
         }
-        previousStatus = Dictionary(uniqueKeysWithValues: alive.map { ($0.id, $0.status) })
+        // Two sessions can collide on `id` (sessionId reused across PIDs
+        // when the harness restarts, sdk-cli forks, or the field is empty
+        // and we fall back to PID for two distinct rows). `uniqueKeysWith,
+        // Values:` traps on duplicates, so dedupe explicitly: keep `busy`
+        // when present so we don't drop a busy,>idle transition on the
+        // next refresh.
+        previousStatus = alive.reduce(into: [String: String]()) { acc, s in
+            if acc[s.id] != "busy" { acc[s.id] = s.status }
+        }
         hasBootstrapped = true
 
         sessions = alive
