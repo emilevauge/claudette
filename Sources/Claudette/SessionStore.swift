@@ -61,6 +61,12 @@ final class SessionStore: ObservableObject {
             guard var session = Self.parse(path: path), Self.isAlive(pid: session.pid) else {
                 continue
             }
+            // Skip headless SDK invocations: `claude -p ...`, programmatic
+            // subagents and any other non,interactive call. They write the
+            // same session JSON as a real CLI session, so without this
+            // filter we show a phantom "duplicate" row in the same cwd as
+            // the real `cli` session that spawned them.
+            if session.entrypoint == "sdk-cli" { continue }
             session.aiTitle = ConversationReader.aiTitle(for: session)
             session.contextFraction = ConversationReader.contextFraction(for: session)
             session.hasBackgroundWork = ConversationReader.hasBackgroundWork(for: session)
