@@ -147,7 +147,7 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         content.title = session.displayName
         content.subtitle = prettyPath(session.cwd)
         if let lastText, !lastText.isEmpty {
-            content.body = String(lastText.prefix(400))
+            content.body = ConversationReader.notificationPreview(from: lastText)
         } else {
             content.body = L("Claude is waiting for input")
         }
@@ -232,8 +232,7 @@ final class SystemNotifications: NSObject, UNUserNotificationCenterDelegate {
         let subtitle = escape(prettyPath(session.cwd))
         let body: String = {
             if let lastText, !lastText.isEmpty {
-                return escape(String(lastText.prefix(300))
-                    .replacingOccurrences(of: "\n", with: " "))
+                return escape(ConversationReader.notificationPreview(from: lastText))
             } else {
                 return escape(L("Claude is waiting for input"))
             }

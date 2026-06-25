@@ -127,6 +127,65 @@ enum GhosttyBridge {
         }
     }
 
+    /// True when the user is already looking at this session: Ghostty is the
+    /// frontmost app AND its focused window/tab title matches the session. The
+    /// caller uses this to suppress a redundant notification.
+    ///
+    /// Returns `false` (→ notify) whenever we can't be sure: Ghostty not
+    /// frontmost, Accessibility not granted, no focused window, or no title
+    /// match. Better to over-notify than to silently swallow.
+    static func isViewing(session: ClaudeSession) -> Bool {
+        // Only suppress when Ghostty is the active app (no AX needed for this).
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID,
+              let title = focusedTerminalTitle(), !title.isEmpty else {
+            return false
+        }
+
+        // Match against the title SessionStore already mapped, or the aiTitle
+        // suffix Claude injects into the tab title (after stripping the leading
+        // spinner / ✳ glyph, which differs between the poll and now).
+        if let mapped = session.terminalTitle, !mapped.isEmpty, mapped == title {
+            return true
+        }
+        if let aiTitle = session.aiTitle, !aiTitle.isEmpty, titleMatches(title, aiTitle: aiTitle) {
+            return true
+        }
+        return false
+    }
+
+    /// Title of Ghostty's currently focused tab. Prefers the Accessibility API
+    /// (cheap, no IPC) when granted ; otherwise falls back to AppleScript
+    /// `name of front window`, which rides the Automation permission. That
+    /// permission survives rebuilds (it keys on bundle id), unlike the
+    /// Accessibility grant, so suppression keeps working without re-granting.
+    /// Returns `nil` when neither path yields a title.
+    private static func focusedTerminalTitle() -> String? {
+        if AXIsProcessTrusted(),
+           let app = NSWorkspace.shared.runningApplications
+            .first(where: { $0.bundleIdentifier == bundleID }) {
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            var focusedRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedRef) == .success,
+               let ref = focusedRef, CFGetTypeID(ref) == AXUIElementGetTypeID() {
+                let focused = ref as! AXUIElement
+                if let title = axString(focused, kAXTitleAttribute), !title.isEmpty {
+                    return title
+                }
+            }
+        }
+
+        // AppleScript fallback (Automation permission). `front window` is the
+        // focused window/tab ; we already gated on Ghostty being frontmost.
+        guard let script = frontWindowNameScript else { return nil }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        guard error == nil, let name = result.stringValue, !name.isEmpty else { return nil }
+        return name
+    }
+
+    private static let frontWindowNameScript: NSAppleScript? =
+        NSAppleScript(source: "tell application \"Ghostty\" to return name of front window")
+
     /// Copy a string-valued accessibility attribute, or `nil`.
     private static func axString(_ element: AXUIElement, _ attribute: String) -> String? {
         var ref: CFTypeRef?

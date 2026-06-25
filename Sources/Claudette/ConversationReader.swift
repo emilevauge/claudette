@@ -48,6 +48,55 @@ enum ConversationReader {
         return nil
     }
 
+    /// Condense an assistant reply into a one-line notification preview:
+    /// drop fenced code blocks, strip common Markdown decoration, flatten to
+    /// a single line, then keep the first sentence (capped at `maxLen`).
+    /// Claude tends to lead with the answer, so the first sentence is usually
+    /// the most useful glance, far better than the raw first 400 characters.
+    static func notificationPreview(from text: String, maxLen: Int = 160) -> String {
+        var s = text
+
+        // Drop fenced code blocks wholesale ; they're noise in a banner.
+        s = s.replacingOccurrences(of: "(?s)```.*?```", with: " ",
+                                   options: .regularExpression)
+
+        // Strip per-line block markers (headings, quotes, list bullets,
+        // numbered lists), then flatten newlines into spaces.
+        let lines = s.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+            var l = String(line).trimmingCharacters(in: .whitespaces)
+            l = l.replacingOccurrences(of: "^#{1,6}\\s*", with: "", options: .regularExpression)
+            l = l.replacingOccurrences(of: "^>\\s*", with: "", options: .regularExpression)
+            l = l.replacingOccurrences(of: "^[-*+]\\s+", with: "", options: .regularExpression)
+            l = l.replacingOccurrences(of: "^\\d+\\.\\s+", with: "", options: .regularExpression)
+            return l
+        }
+        s = lines.joined(separator: " ")
+
+        // Inline syntax: links [text](url) → text, then drop emphasis/code marks.
+        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]*\\)", with: "$1",
+                                   options: .regularExpression)
+        for marker in ["**", "__", "`", "*", "_", "#"] {
+            s = s.replacingOccurrences(of: marker, with: "")
+        }
+
+        // Collapse runs of whitespace.
+        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return s }
+
+        // First sentence, if it fits.
+        if let term = s.range(of: "[.!?](\\s|$)", options: .regularExpression) {
+            let sentence = String(s[..<term.upperBound]).trimmingCharacters(in: .whitespaces)
+            if sentence.count <= maxLen { return sentence }
+        }
+        // No terminator, or first sentence too long: hard cap with an ellipsis.
+        if s.count > maxLen {
+            let idx = s.index(s.startIndex, offsetBy: maxLen)
+            return s[..<idx].trimmingCharacters(in: .whitespaces) + "…"
+        }
+        return s
+    }
+
     /// Return the latest LLM,generated title for this session, or `nil` if
     /// none has been produced yet (very short sessions, or sessions whose
     /// JSON already carries an explicit `name`, in which case Claude Code

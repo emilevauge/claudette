@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, ObservableObject {
 
         store.start()
         store.onSessionBecameIdle = { session in
+            // Skip the notification when the user is already looking at this
+            // session's Ghostty window/tab : it would just be noise.
+            if GhosttyBridge.isViewing(session: session) { return }
             let lastText = ConversationReader.lastAssistantText(for: session)
             SystemNotifications.shared.notifyIdle(session, lastText: lastText)
         }
