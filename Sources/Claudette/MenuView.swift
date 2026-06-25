@@ -297,13 +297,12 @@ private struct SessionRow: View {
                 .fill(color.opacity(0.22))
                 .frame(width: 16, height: 16)
 
+            // Static dot, color-coded by phase. A repeating `.symbolEffect`
+            // here drives a continuous SwiftUI DisplayList rebuild while the
+            // menu is open ; the color already conveys state.
             Image(systemName: "circle.fill")
                 .font(.system(size: 9))
                 .foregroundStyle(color)
-                // Pulse only when something is actually happening (busy or
-                // needs,attention). Idle sessions get a static dot, otherwise
-                // every row blinks for no reason and pulls the eye.
-                .symbolEffect(.pulse, options: .repeating, isActive: session.phase != .idle)
         }
     }
 

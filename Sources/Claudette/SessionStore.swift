@@ -35,6 +35,11 @@ final class SessionStore: ObservableObject {
 
     func start() {
         guard timer == nil else { return }
+        // Surface the Accessibility prompt once. Granting it lets the poll
+        // loop read Ghostty titles via the (cheap) Accessibility API instead
+        // of an Apple Event round-trip ; until then we transparently fall
+        // back to AppleScript.
+        GhosttyBridge.ensureAccessibilityPermission(prompt: true)
         refresh()
         let t = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -75,8 +80,13 @@ final class SessionStore: ObservableObject {
         }
 
         // Annotate with the matching Ghostty terminal: its title reflects the
-        // real state of Claude (Braille spinner / ✳) in real time.
-        let terminals = ghosttyIsRunning() ? GhosttyBridge.listTerminals() : []
+        // real state of Claude (Braille spinner / ✳) in real time. Skip the
+        // enumeration entirely when there are no alive sessions to annotate.
+        // `listTerminals()` uses the Accessibility API on the hot path, so
+        // this is cheap enough to run every poll.
+        let terminals = (alive.isEmpty || !ghosttyIsRunning())
+            ? []
+            : GhosttyBridge.listTerminals()
         if !terminals.isEmpty {
             alive = alive.map { Self.annotate($0, with: terminals) }
         }

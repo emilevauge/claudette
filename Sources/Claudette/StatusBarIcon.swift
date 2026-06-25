@@ -40,15 +40,23 @@ struct StatusBarIcon: View {
 
     @ViewBuilder
     private var icon: some View {
+        // No repeating `.symbolEffect(.pulse)`: in an `NSHostingView` it drives
+        // a 60fps SwiftUI DisplayList rebuild for as long as a session is busy,
+        // which burned ~18% CPU continuously. A static color cue is free and
+        // reads just as clearly: blue while busy, red when attention is needed.
+        //
+        // Both "active" states (busy / needsAttention) share the same prominent
+        // treatment: bold glyph plus a white halo, differing only in tint. Idle
+        // and empty stay light and plain.
+        let prominent = phase == .busy || phase == .needsAttention
         let base = Image(systemName: symbol)
-            .font(.system(size: 14, weight: phase == .needsAttention ? .bold : .semibold))
-            .foregroundStyle(phase == .needsAttention ? Color.red : .primary)
-            .symbolEffect(.pulse, options: .repeating, isActive: shouldPulse)
+            .font(.system(size: 14, weight: prominent ? .bold : .semibold))
+            .foregroundStyle(tint)
 
-        if phase == .needsAttention {
-            // Soft white halo around the red glyph: stacked low,radius
-            // shadows reinforce each other into a thin glow that reads as
-            // an outline against any menu bar wallpaper.
+        if prominent {
+            // Soft white halo around the glyph: stacked low-radius shadows
+            // reinforce each other into a thin glow that reads as an outline
+            // against any menu bar wallpaper.
             base
                 .shadow(color: .white, radius: 0.8)
                 .shadow(color: .white, radius: 0.8)
@@ -61,7 +69,16 @@ struct StatusBarIcon: View {
         phase == .empty ? "terminal" : "terminal.fill"
     }
 
-    private var shouldPulse: Bool {
-        phase == .busy || phase == .needsAttention
+    /// Orange used for in-progress sessions, matching the busy dot in the
+    /// menu (`MenuView.orange`).
+    private static let busyOrange = Color(red: 1.00, green: 0.58, blue: 0.00)
+
+    /// Static color cue, replacing the old repeating pulse animation.
+    private var tint: Color {
+        switch phase {
+        case .needsAttention: return .red
+        case .busy: return Self.busyOrange
+        case .idle, .empty: return .primary
+        }
     }
 }
