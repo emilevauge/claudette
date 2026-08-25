@@ -46,8 +46,9 @@ final class AppDelegate: NSObject, ObservableObject {
             let lastText = ConversationReader.lastAssistantText(for: session)
             SystemNotifications.shared.notifyIdle(session, lastText: lastText)
         }
-        SystemNotifications.shared.onClick = { session in
-            _ = GhosttyBridge.focus(session: session)
+        SystemNotifications.shared.onClick = { [weak self] session in
+            _ = GhosttyBridge.focus(session: session,
+                                    others: self?.store.sessions ?? [])
         }
         SystemNotifications.shared.requestPermission()
 

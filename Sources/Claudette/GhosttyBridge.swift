@@ -26,14 +26,21 @@ enum GhosttyBridge {
     // MARK: public API
 
     /// Try to focus the window/tab/split running the given session.
+    ///
+    /// `others` is the rest of the session list. It only matters for the cwd
+    /// fallback: several sessions in one directory are indistinguishable by
+    /// cwd, so we exclude terminals that another session claims by aiTitle
+    /// rather than focusing whichever one AppleScript happens to list first.
+    ///
     /// Strategy:
     ///   0. if SessionStore already mapped a terminal id, use it directly.
     ///   1. if we know the session's `aiTitle`, match by exact title (deterministic).
-    ///   2. exact match on the terminal's `working directory`, tie,break by title.
+    ///   2. exact match on the terminal's `working directory`, minus terminals
+    ///      owned by another session, tie,break by title.
     ///   3. if no cwd match, fallback: window whose title contains the session `name`.
     ///   4. last resort: just bring Ghostty to the front.
     @discardableResult
-    static func focus(session: ClaudeSession) -> Bool {
+    static func focus(session: ClaudeSession, others: [ClaudeSession] = []) -> Bool {
         // 0: pre,mapped id from the store. The AX poll path leaves `terminalId`
         // empty (AX exposes no Ghostty id), so guard against the empty string.
         if let tid = session.terminalId, !tid.isEmpty, focusTerminal(id: tid) {
@@ -47,12 +54,25 @@ enum GhosttyBridge {
 
         // 1: deterministic match via aiTitle.
         if let aiTitle = session.aiTitle, !aiTitle.isEmpty,
-           let t = terminals.first(where: { titleMatches($0.name, aiTitle: aiTitle) }),
+           let t = terminals.first(where: {
+               ClaudeTitle.matches(title: $0.name, aiTitle: aiTitle)
+           }),
            focusTerminal(id: t.id) {
             return true
         }
 
-        let byCwd = terminals.filter { $0.cwd == session.cwd }
+        // Titles owned by a *different* session: never a valid target here.
+        let takenTitles = others
+            .filter { $0.id != session.id }
+            .compactMap { s -> String? in
+                guard let t = s.aiTitle, !t.isEmpty else { return nil }
+                return t
+            }
+        func isTaken(_ t: GhosttyTerminal) -> Bool {
+            takenTitles.contains { ClaudeTitle.matches(title: t.name, aiTitle: $0) }
+        }
+
+        let byCwd = terminals.filter { $0.cwd == session.cwd && !isTaken($0) }
         let needle = (session.name?.isEmpty == false) ? session.name! : session.windowSearchKey
 
         // 2: cwd match, tie,break by title.
@@ -67,19 +87,6 @@ enum GhosttyBridge {
         // 4: give up and at least activate the app.
         activateApp()
         return false
-    }
-
-    /// See `SessionStore.titleMatches`: a Ghostty title matches an aiTitle if,
-    /// once the leading Braille spinner or `✳` glyph is stripped, the rest
-    /// equals (or starts with) the aiTitle.
-    private static func titleMatches(_ title: String, aiTitle: String) -> Bool {
-        var s = Substring(title)
-        if let first = s.unicodeScalars.first,
-           (0x2800...0x28FF).contains(first.value) || first.value == 0x2733 {
-            s = s.dropFirst()
-        }
-        let trimmed = s.trimmingCharacters(in: .whitespaces)
-        return trimmed == aiTitle || trimmed.hasPrefix(aiTitle)
     }
 
     /// Field separator for `listTerminals`: an unlikely unit-separator byte.
@@ -147,7 +154,8 @@ enum GhosttyBridge {
         if let mapped = session.terminalTitle, !mapped.isEmpty, mapped == title {
             return true
         }
-        if let aiTitle = session.aiTitle, !aiTitle.isEmpty, titleMatches(title, aiTitle: aiTitle) {
+        if let aiTitle = session.aiTitle, !aiTitle.isEmpty,
+           ClaudeTitle.matches(title: title, aiTitle: aiTitle) {
             return true
         }
         return false

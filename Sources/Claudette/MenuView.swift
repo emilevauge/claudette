@@ -210,7 +210,7 @@ struct MenuView: View {
         if session.isClaudeDesktop {
             _ = ClaudeDesktopBridge.focus(session: session)
         } else {
-            _ = GhosttyBridge.focus(session: session)
+            _ = GhosttyBridge.focus(session: session, others: store.sessions)
         }
     }
 }

@@ -80,7 +80,7 @@ final class SessionStore: ObservableObject {
         }
 
         // Annotate with the matching Ghostty terminal: its title reflects the
-        // real state of Claude (Braille spinner / ✳) in real time. Skip the
+        // real state of Claude (spinner glyph / ✳) in real time. Skip the
         // enumeration entirely when there are no alive sessions to annotate.
         // `listTerminals()` uses the Accessibility API on the hot path, so
         // this is cheap enough to run every poll.
@@ -88,7 +88,7 @@ final class SessionStore: ObservableObject {
             ? []
             : GhosttyBridge.listTerminals()
         if !terminals.isEmpty {
-            alive = alive.map { Self.annotate($0, with: terminals) }
+            alive = Self.annotate(alive, with: terminals)
         }
 
         // Sort: busy first, then most recently updated.
@@ -132,82 +132,86 @@ final class SessionStore: ObservableObject {
             .contains(where: { $0.bundleIdentifier == "com.mitchellh.ghostty" })
     }
 
-    /// Find the Ghostty terminal matching a session.
-    /// 0) if we know the `aiTitle`, match by exact suffix: Claude Code injects
-    ///    `<spinner|✳> <aiTitle>` into the tab title verbatim, so this is a
-    ///    deterministic match with no false positives.
-    /// 1) otherwise, match by normalized cwd.
-    /// 2) if several candidates, prefer those whose title starts with a Braille
-    ///    spinner (busy) or `✳` (idle): that's a Claude terminal, not a plain
-    ///    shell that happens to share the same directory.
-    /// 3) among the remaining candidates, prefer the one whose title contains
-    ///    the session `name`.
-    /// 4) if no cwd match at all, last resort: any terminal whose title
-    ///    contains the session name AND looks like a Claude terminal.
+    /// Map each session to at most one Ghostty terminal, and each terminal to
+    /// at most one session.
+    ///
+    /// The one,to,one part matters: matching each session independently made
+    /// two sessions in the same directory both settle on the same terminal
+    /// (the first cwd match), so they showed the same busy state and the same
+    /// row click focused the same tab. Terminals are claimed as they are
+    /// assigned, and the deterministic pass runs before the fuzzy one so a
+    /// weak cwd match can never steal a terminal an aiTitle match needs.
+    ///
+    /// Pass 1 : exact `aiTitle` match. Claude Code injects `<glyph> <aiTitle>`
+    ///   into the tab title verbatim, and the aiTitle is unique per session,
+    ///   so this is collision,free.
+    /// Pass 2 : match on normalized cwd, preferring terminals that actually
+    ///   run Claude (glyph,prefixed title) over plain shells parked in the
+    ///   same directory, then those whose title contains the session `name`.
+    /// Pass 3 : no cwd match at all : any unclaimed Claude terminal whose
+    ///   title contains the session `name`.
     private static func annotate(
-        _ session: ClaudeSession,
+        _ sessions: [ClaudeSession],
         with terminals: [GhosttyBridge.GhosttyTerminal]
-    ) -> ClaudeSession {
+    ) -> [ClaudeSession] {
         // Claude Desktop agents have no terminal of their own; skip matching.
-        if session.isClaudeDesktop { return session }
+        let matchable = sessions.indices.filter { !sessions[$0].isClaudeDesktop }
+        var result = sessions
+        var claimed = Set<Int>()
 
-        // Step 0: deterministic match via aiTitle when available.
-        if let aiTitle = session.aiTitle, !aiTitle.isEmpty,
-           let t = terminals.first(where: { titleMatches($0.name, aiTitle: aiTitle) }) {
-            var s = session
-            s.terminalTitle = t.name
-            s.terminalId = t.id
-            return s
+        func claim(_ sessionIndex: Int, _ terminalIndex: Int) {
+            claimed.insert(terminalIndex)
+            result[sessionIndex].terminalTitle = terminals[terminalIndex].name
+            result[sessionIndex].terminalId = terminals[terminalIndex].id
         }
 
-        let needle = (session.name?.isEmpty == false) ? session.name! : session.windowSearchKey
-        let sessionCwd = normalize(session.cwd)
-
-        let byCwd = terminals.filter { normalize($0.cwd) == sessionCwd }
-        // Step 2: keep only Claude terminals when we have the choice.
-        let claudeCandidates = byCwd.filter(isClaudeTerminal)
-        let pool = claudeCandidates.isEmpty ? byCwd : claudeCandidates
-
-        let chosen: GhosttyBridge.GhosttyTerminal? =
-            pool.first(where: { $0.name.contains(needle) })
-            ?? pool.first
-            ?? terminals.first(where: { !needle.isEmpty && $0.name.contains(needle) && isClaudeTerminal($0) })
-
-        guard let t = chosen else { return session }
-
-        var s = session
-        s.terminalTitle = t.name
-        s.terminalId = t.id
-        return s
-    }
-
-    /// A Ghostty title matches an aiTitle if, after trimming the leading
-    /// Braille spinner or `✳` glyph plus whitespace, it equals the aiTitle.
-    /// We tolerate Claude appending a status suffix in the future by using
-    /// `hasPrefix` rather than equality.
-    private static func titleMatches(_ title: String, aiTitle: String) -> Bool {
-        var s = Substring(title)
-        if let first = s.unicodeScalars.first,
-           (0x2800...0x28FF).contains(first.value) || first.value == 0x2733 {
-            s = s.dropFirst()
+        func firstUnclaimed(
+            _ candidates: [Int],
+            where predicate: (GhosttyBridge.GhosttyTerminal) -> Bool
+        ) -> Int? {
+            candidates.first { !claimed.contains($0) && predicate(terminals[$0]) }
         }
-        let trimmed = s.trimmingCharacters(in: .whitespaces)
-        return trimmed == aiTitle || trimmed.hasPrefix(aiTitle)
+
+        let all = Array(terminals.indices)
+
+        // Pass 1: deterministic, so it gets first pick of the terminals.
+        var unmatched: [Int] = []
+        for i in matchable {
+            guard let aiTitle = result[i].aiTitle, !aiTitle.isEmpty,
+                  let t = firstUnclaimed(all, where: {
+                      ClaudeTitle.matches(title: $0.name, aiTitle: aiTitle)
+                  }) else {
+                unmatched.append(i)
+                continue
+            }
+            claim(i, t)
+        }
+
+        // Pass 2 and 3: heuristics, on whatever terminals are left.
+        for i in unmatched {
+            let session = result[i]
+            let needle = (session.name?.isEmpty == false) ? session.name! : session.windowSearchKey
+            let sessionCwd = normalize(session.cwd)
+
+            let byCwd = all.filter { normalize(terminals[$0].cwd) == sessionCwd }
+            let claudeOnly = byCwd.filter { ClaudeTitle.isClaudeTerminal(title: terminals[$0].name) }
+            let pool = claudeOnly.isEmpty ? byCwd : claudeOnly
+
+            let chosen = firstUnclaimed(pool, where: { $0.name.contains(needle) })
+                ?? firstUnclaimed(pool, where: { _ in true })
+                ?? firstUnclaimed(all, where: {
+                    !needle.isEmpty && $0.name.contains(needle)
+                        && ClaudeTitle.isClaudeTerminal(title: $0.name)
+                })
+
+            if let t = chosen { claim(i, t) }
+        }
+
+        return result
     }
 
     private static func normalize(_ path: String) -> String {
         URL(fileURLWithPath: path).standardizedFileURL.path
-    }
-
-    /// A Ghostty terminal runs Claude Code when its title starts with a Braille
-    /// character (busy spinner) or `✳` (idle). Plain shells display something
-    /// like `user@host:path` which fails this check.
-    private static func isClaudeTerminal(_ t: GhosttyBridge.GhosttyTerminal) -> Bool {
-        let trimmed = t.name.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.unicodeScalars.first else { return false }
-        if (0x2800...0x28FF).contains(first.value) { return true } // Braille
-        if first.value == 0x2733 { return true }                   // ✳
-        return false
     }
 
     private static func parse(path: String) -> ClaudeSession? {

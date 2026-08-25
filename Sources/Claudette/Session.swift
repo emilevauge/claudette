@@ -122,10 +122,10 @@ struct ClaudeSession: Identifiable, Hashable {
     var isBusy: Bool {
         if let title = terminalTitle?.trimmingCharacters(in: .whitespaces),
            let first = title.unicodeScalars.first {
-            // Braille range U+2800..U+28FF: Claude shows a Braille spinner when busy.
-            if (0x2800...0x28FF).contains(first.value) { return true }
-            // ✳ (U+2733): Claude is waiting for user input.
-            if first.value == 0x2733 { return false }
+            // Spinner frame: the model is producing output.
+            if ClaudeTitle.isBusySpinner(first.value) { return true }
+            // ✳: Claude is waiting for user input.
+            if ClaudeTitle.isIdleMark(first.value) { return false }
         }
         return status == "busy"
     }

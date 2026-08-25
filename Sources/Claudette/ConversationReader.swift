@@ -98,27 +98,36 @@ enum ConversationReader {
     }
 
     /// Return the latest LLM,generated title for this session, or `nil` if
-    /// none has been produced yet (very short sessions, or sessions whose
-    /// JSON already carries an explicit `name`, in which case Claude Code
-    /// skips title generation).
+    /// none has been produced yet (very short sessions).
     ///
     /// The transcript contains zero or more `{"type":"ai-title","aiTitle":"..."}`
     /// entries; we keep the last one. Results are cached by file mtime so
     /// re,reading the same unchanged transcript on each refresh is cheap.
+    ///
+    /// This runs for every session, including those whose JSON carries an
+    /// explicit `name`. Claude Code emits `ai,title` entries and publishes
+    /// them in the terminal title regardless of `name`, and the aiTitle is
+    /// our only per,session,unique matching key : two sessions in the same
+    /// directory are indistinguishable by cwd, and `name` never appears in
+    /// the Ghostty title, so skipping the read for named sessions left them
+    /// permanently unmatchable.
     static func aiTitle(for session: ClaudeSession) -> String? {
-        // Short,circuit: an explicit session name means Claude Code does not
-        // emit ai,title entries. Spares us reading a potentially huge JSONL
-        // on every refresh (long sessions can be hundreds of MB).
-        if let n = session.name, !n.isEmpty { return nil }
-
         let path = transcriptPath(for: session)
         let mtime = mtimeOf(path)
+        let cached = cache.value(for: session.sessionId)
 
-        if let cached = cache.value(for: session.sessionId), cached.mtime == mtime {
-            return cached.title
-        }
+        if let cached, cached.mtime == mtime { return cached.title }
 
-        let title = mtime == nil ? nil : readAiTitle(from: path)
+        // A busy session's transcript changes on every poll, so we only ever
+        // scan the cheap tail window here and fall back to the title we
+        // already knew. Growing the window (up to 4 MB) is reserved for the
+        // first read, when we have nothing to fall back on : the aiTitle
+        // moves at most a few times per session, so a miss in the tail means
+        // "unchanged", not "gone".
+        let title = mtime == nil
+            ? nil
+            : readAiTitle(from: path, maxWindow: cached?.title == nil ? 4 * 1024 * 1024 : 64 * 1024)
+                ?? cached?.title
         cache.set(sessionId: session.sessionId, mtime: mtime, title: title)
         return title
     }
@@ -331,7 +340,8 @@ enum ConversationReader {
     /// long sessions, but Claude re,emits `ai-title` entries regularly. Read
     /// the last 64 KB and expand exponentially up to 4 MB if no entry is
     /// found, instead of loading the whole file each refresh.
-    private static func readAiTitle(from path: String) -> String? {
+    private static func readAiTitle(from path: String,
+                                    maxWindow: UInt64 = 4 * 1024 * 1024) -> String? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
 
@@ -339,8 +349,7 @@ enum ConversationReader {
         do { size = try handle.seekToEnd() } catch { return nil }
         if size == 0 { return nil }
 
-        var window: UInt64 = 64 * 1024
-        let maxWindow: UInt64 = 4 * 1024 * 1024
+        var window: UInt64 = min(64 * 1024, maxWindow)
 
         while true {
             let from = size > window ? size - window : 0
