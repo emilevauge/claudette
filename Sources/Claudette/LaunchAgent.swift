@@ -26,8 +26,51 @@ enum LaunchAgent {
         FileManager.default.fileExists(atPath: plistURL.path)
     }
 
+    /// Executable path recorded in the installed plist, or `nil`.
+    private static var installedProgramPath: String? {
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: data, options: [], format: nil) as? [String: Any],
+              let args = plist["ProgramArguments"] as? [String]
+        else { return nil }
+        return args.first
+    }
+
+    /// Repoint the LaunchAgent at the running copy when the recorded path is
+    /// stale. `enable()` captures whichever binary was running at toggle
+    /// time, typically a dev build. Later the user installs (or the
+    /// self-updater swaps in) `/Applications/Claudette.app`, and launchd
+    /// keeps starting the old copy at login next to the new one. We rewrite
+    /// the plist when the recorded binary is gone, or when we run from
+    /// `/Applications` and the plist points elsewhere. Only the file is
+    /// rewritten: launchd re-reads it at next login, and reloading now would
+    /// spawn a second copy immediately (`RunAtLoad`).
+    static func syncIfNeeded() {
+        guard isEnabled, let recorded = installedProgramPath else { return }
+        let current = executablePath
+        guard recorded != current else { return }
+        let recordedExists = FileManager.default.fileExists(atPath: recorded)
+        let runningFromApplications = current.hasPrefix("/Applications/")
+        guard !recordedExists || runningFromApplications else { return }
+        do {
+            try writePlist()
+            NSLog("Claudette: LaunchAgent repointed from %@ to %@", recorded, current)
+        } catch {
+            NSLog("Claudette: LaunchAgent sync failed: %@", "\(error)")
+        }
+    }
+
     /// Enable launch at login: write the plist and load it in launchd.
     static func enable() throws {
+        try writePlist()
+        // Load into launchd. Ignore failure if it's already loaded. With
+        // `RunAtLoad` this starts a copy right away; the single-instance
+        // guard in `ClaudetteApp` makes that copy exit immediately.
+        _ = run("/bin/launchctl", ["load", "-w", plistURL.path])
+    }
+
+    /// Write the plist pointing at the running executable.
+    private static func writePlist() throws {
         let dir = plistURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
@@ -44,9 +87,6 @@ enum LaunchAgent {
             options: 0
         )
         try data.write(to: plistURL, options: .atomic)
-
-        // Load into launchd. Ignore failure if it's already loaded.
-        _ = run("/bin/launchctl", ["load", "-w", plistURL.path])
     }
 
     /// Disable launch at login: unload from launchd and delete the plist.

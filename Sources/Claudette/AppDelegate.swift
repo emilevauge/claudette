@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, ObservableObject {
         // App icon consistent with the menu bar and notifications.
         AppIcon.install()
 
+        // Keep "launch at login" pointing at this copy once it lives in
+        // /Applications (see LaunchAgent.syncIfNeeded).
+        LaunchAgent.syncIfNeeded()
+
         store.start()
         store.onSessionBecameIdle = { session in
             // Skip the notification when the user is already looking at this

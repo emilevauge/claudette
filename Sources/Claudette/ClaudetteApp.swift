@@ -18,6 +18,25 @@ struct ClaudetteApp: App {
             let ok = MainActor.assumeIsolated { AppIcon.writePNG(to: path) }
             exit(ok ? 0 : 1)
         }
+
+        // Single instance. The LaunchAgent, the self-updater and a manual
+        // `open` can each start Claudette while another copy (possibly from
+        // a different bundle path) is already running. Two copies fight over
+        // the status item and, because each ad-hoc build has its own cdhash,
+        // trigger the Accessibility prompt on every switch. The newcomer
+        // yields to the running instance.
+        if Self.anotherInstanceIsRunning() {
+            NSLog("Claudette: another instance is already running, exiting")
+            exit(0)
+        }
+    }
+
+    /// True when another process with our bundle identifier is alive.
+    private static func anotherInstanceIsRunning() -> Bool {
+        guard let id = Bundle.main.bundleIdentifier else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication.runningApplications(withBundleIdentifier: id)
+            .contains { $0.processIdentifier != me && !$0.isTerminated }
     }
 
     var body: some Scene {
