@@ -95,8 +95,19 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# Signature ad-hoc : suffit pour que macOS accepte de lancer le bundle local.
-codesign --force --deep --sign - "$APP" >/dev/null
+# Signature. Avec une identité stable (certificat auto-signé "code signing"
+# dans le trousseau, voir README), la designated requirement de l'app ne
+# change pas d'un build à l'autre : TCC garde l'autorisation Accessibilité
+# au lieu de la redemander à chaque rebuild. Sans identité, signature ad hoc :
+# le cdhash change à chaque build et macOS redemande la permission.
+SIGN_IDENTITY="${CLAUDETTE_SIGN_IDENTITY:-Claudette Dev}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
+    echo "▶ Signature avec « $SIGN_IDENTITY »…"
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP" >/dev/null
+else
+    echo "▶ Signature ad hoc (aucune identité « $SIGN_IDENTITY » dans le trousseau)."
+    codesign --force --deep --sign - "$APP" >/dev/null
+fi
 
 # Rafraichit le cache d'icônes pour que Finder voie l'icône.
 touch "$APP"

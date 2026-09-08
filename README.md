@@ -77,6 +77,32 @@ On first launch Claudette will ask for:
 - **Automation → Ghostty** : required to enumerate terminals and focus the right window. Triggered automatically on the first AppleScript call.
 - **Notifications** : tap *Allow* on the system prompt for banner notifications when a session goes from thinking to waiting.
 
+- **Accessibility** : lets Claudette read Ghostty window titles through the Accessibility API instead of AppleScript round-trips.
+
+The bundle is ad-hoc signed by default, so every rebuild gets a new code hash and macOS asks for Accessibility again. To keep the grant across builds, create a local self-signed code-signing certificate once and `make-app.sh` will pick it up (override the name with `CLAUDETTE_SIGN_IDENTITY`):
+
+```sh
+cat > /tmp/cs.cnf <<'EOF'
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = Claudette Dev
+[ext]
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, codeSigning
+basicConstraints = critical, CA:false
+EOF
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config /tmp/cs.cnf -keyout /tmp/cs.key -out /tmp/cs.pem
+# Import key and cert as PEM (PKCS12 from OpenSSL 3 is rejected by `security import`).
+security import /tmp/cs.key -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign
+security import /tmp/cs.pem -k ~/Library/Keychains/login.keychain-db
+security add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db /tmp/cs.pem
+rm /tmp/cs.key
+security find-identity -v -p codesigning   # should list "Claudette Dev"
+```
+
 If you accidentally refuse one of them, reset and relaunch:
 
 ```sh
