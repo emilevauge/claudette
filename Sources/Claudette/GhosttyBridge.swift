@@ -102,7 +102,26 @@ enum GhosttyBridge {
     /// (just more expensively) until the user enables it.
     static func listTerminals() -> [GhosttyTerminal] {
         if let viaAX = listTerminalsViaAX() { return viaAX }
-        return listTerminalsViaAppleScript()
+        return cachedTerminalsViaAppleScript()
+    }
+
+    /// Minimum delay between two AppleScript enumerations on the poll path.
+    /// A synchronous Apple Event costs hundreds of milliseconds and blocks
+    /// the main thread, so without this the fallback runs as often as the
+    /// 2 s poll and the app spends its time waiting on Ghostty. Terminal
+    /// titles move on Claude's spinner tick, so a few seconds of staleness
+    /// only delays the busy dot, it doesn't break matching.
+    private static let appleScriptPollInterval: TimeInterval = 6.0
+    private static var appleScriptCache: (at: Date, terminals: [GhosttyTerminal])?
+
+    private static func cachedTerminalsViaAppleScript() -> [GhosttyTerminal] {
+        if let cached = appleScriptCache,
+           Date().timeIntervalSince(cached.at) < appleScriptPollInterval {
+            return cached.terminals
+        }
+        let terminals = listTerminalsViaAppleScript()
+        appleScriptCache = (Date(), terminals)
+        return terminals
     }
 
     // MARK: Accessibility transport (hot path)

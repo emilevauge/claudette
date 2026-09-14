@@ -50,6 +50,15 @@ final class SessionStore: ObservableObject {
     /// First refresh: don't emit transitions on cold start.
     private var hasBootstrapped = false
 
+    /// True while a refresh is running. `listTerminals()` can fall back to
+    /// AppleScript, and a synchronous Apple Event pumps the run loop while it
+    /// waits for the reply: the poll timer fires again *inside* that wait and
+    /// starts a second refresh, which blocks in AppleScript in turn. Nothing
+    /// ever reaches the `sessions` assignment at the end, so the published
+    /// list freezes on the last refresh that completed, whatever the poll
+    /// loop keeps burning. Re-entrant calls return immediately instead.
+    private var isRefreshing = false
+
     init(pollInterval: TimeInterval = 2.0) {
         self.sessionsDir = "\(NSHomeDirectory())/.claude/sessions"
         self.pollInterval = pollInterval
@@ -76,6 +85,10 @@ final class SessionStore: ObservableObject {
     }
 
     func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: sessionsDir) else {
             sessions = []
