@@ -31,6 +31,17 @@ final class SessionStore: ObservableObject {
     /// session whose JSON vanished outright between two polls.
     private var lastSeenAlive: [String: ClaudeSession] = [:]
 
+    /// Closed sessions the user has just clicked, with the moment of the
+    /// click. `claude --resume` takes a few seconds to boot and register its
+    /// own session JSON, and until then nothing in the list moves: the row
+    /// stays grey and the click reads as ignored. The row shows a "resuming"
+    /// state meanwhile. An entry is cleared when the session shows up alive
+    /// (Claude Code keeps the session id across a resume) or when the wait
+    /// runs out, so a resume that fails doesn't leave a spinner behind.
+    @Published private(set) var resuming: Set<String> = []
+    private var resumingSince: [String: Date] = [:]
+    private let resumeTimeout: TimeInterval = 45
+
     /// Retention the transcript backfill last ran for, in days. Zero until it
     /// has run. Widening the window in the settings panel brings older
     /// transcripts into range, so the backfill runs again; narrowing it only
@@ -139,6 +150,17 @@ final class SessionStore: ObservableObject {
             historyStore.backfillFromTranscripts(excluding: aliveIds)
         }
 
+        // Stop waiting on a resume once its session is alive, or once the
+        // wait has run out.
+        if !resumingSince.isEmpty {
+            let now = Date()
+            let before = resumingSince.count
+            resumingSince = resumingSince.filter { id, since in
+                !aliveIds.contains(id) && now.timeIntervalSince(since) < resumeTimeout
+            }
+            if resumingSince.count != before { resuming = Set(resumingSince.keys) }
+        }
+
         // A session id can come back from the dead (`claude --resume` keeps
         // it), so never show the same session in both lists.
         let closed = historyStore.sorted.filter { !aliveIds.contains($0.sessionId) }
@@ -191,6 +213,12 @@ final class SessionStore: ObservableObject {
         hasBootstrapped = true
 
         sessions = alive
+    }
+
+    /// Note that the user asked to reopen this closed session.
+    func markResuming(_ closed: ClosedSession) {
+        resumingSince[closed.sessionId] = Date()
+        resuming = Set(resumingSince.keys)
     }
 
     /// Drop one closed session from the history (user action).

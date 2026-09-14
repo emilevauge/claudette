@@ -50,3 +50,4 @@
 "Closed sessions stay at the bottom of the list for this long, then are forgotten." = "Les sessions fermées restent en bas de la liste pendant cette durée, puis sont oubliées.";
 
 "Closed %@" = "Fermée le %@";
+"resuming…" = "reprise…";

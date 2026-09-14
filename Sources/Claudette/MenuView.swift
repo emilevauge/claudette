@@ -154,7 +154,7 @@ struct MenuView: View {
                                 selected: index == selectedIndex,
                                 onClick: { focus(session) }
                             )
-                            .id(rowID(index))
+                            .id("live-\(session.id)")
                         }
 
                         if !filteredHistory.isEmpty {
@@ -166,29 +166,36 @@ struct MenuView: View {
                             ClosedSessionRow(
                                 session: closed,
                                 selected: row == selectedIndex,
+                                resuming: store.resuming.contains(closed.sessionId),
                                 onClick: { resume(closed) },
                                 onForget: { store.forget(closed) }
                             )
-                            .id(rowID(row))
+                            .id("closed-\(closed.id)")
                         }
                     }
                     .padding(.vertical, 4)
                 }
                 .frame(maxHeight: listMaxHeight)
                 .onChange(of: selectedIndex) { _, newIndex in
-                    guard (0..<rowCount).contains(newIndex) else { return }
+                    guard let anchor = anchor(for: newIndex) else { return }
                     withAnimation(.easeInOut(duration: 0.1)) {
-                        proxy.scrollTo(rowID(newIndex), anchor: .center)
+                        proxy.scrollTo(anchor, anchor: .center)
                     }
                 }
             }
         }
     }
 
-    /// Scroll anchor. Live and closed rows share one index space, and a
-    /// session id can appear in both lists for one poll (a session that just
-    /// exited), so the index is what makes the anchor unique.
-    private func rowID(_ index: Int) -> String { "row-\(index)" }
+    /// Scroll anchor for a row of the combined index space. Anchors are keyed
+    /// on the session id, the same identity `ForEach` diffs on, and prefixed
+    /// by section: the two lists can hold the same id for one poll, when a
+    /// session has just exited or just been resumed.
+    private func anchor(for index: Int) -> String? {
+        if filtered.indices.contains(index) { return "live-\(filtered[index].id)" }
+        let historyIndex = index - filtered.count
+        guard filteredHistory.indices.contains(historyIndex) else { return nil }
+        return "closed-\(filteredHistory[historyIndex].id)"
+    }
 
     /// Separator introducing the closed sessions.
     private var historyHeader: some View {
@@ -275,7 +282,8 @@ struct MenuView: View {
 
     /// Reopen a closed session in a new Ghostty window (`claude --resume`).
     private func resume(_ closed: ClosedSession) {
-        guard closed.isResumable else { return }
+        guard closed.isResumable, !store.resuming.contains(closed.sessionId) else { return }
+        store.markResuming(closed)
         AppDelegate.shared.closePopover()
         SessionResumer.resume(closed)
     }
@@ -599,6 +607,7 @@ private enum RowFormat {
 private struct ClosedSessionRow: View {
     let session: ClosedSession
     let selected: Bool
+    let resuming: Bool
     let onClick: () -> Void
     let onForget: () -> Void
 
@@ -634,12 +643,26 @@ private struct ClosedSessionRow: View {
                     // between its first prompt and its last, which can be
                     // weeks and says nothing about the session. When it
                     // closed is what tells the user how long it will stay.
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock.arrow.circlepath")
-                        Text(RowFormat.elapsed(since: session.endedAt))
+                    if resuming {
+                        // `claude --resume` needs a few seconds to boot and
+                        // register. Say so, otherwise the click reads as lost.
+                        // Static glyph rather than a ProgressView: an
+                        // indeterminate spinner rebuilds the DisplayList on
+                        // every frame for as long as the popover is open,
+                        // which is what the status dot avoids too.
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text(L("resuming…"))
+                        }
+                        .font(.caption2)
+                    } else {
+                        HStack(spacing: 3) {
+                            Image(systemName: "clock.arrow.circlepath")
+                            Text(RowFormat.elapsed(since: session.endedAt))
+                        }
+                        .font(.caption2)
+                        .help(L("Closed \(RowFormat.absolute(session.endedAt))"))
                     }
-                    .font(.caption2)
-                    .help(L("Closed \(RowFormat.absolute(session.endedAt))"))
                 }
 
                 Spacer(minLength: 0)
@@ -647,6 +670,7 @@ private struct ClosedSessionRow: View {
                 Image(systemName: resumable ? "arrow.uturn.left" : "xmark.circle")
                     .font(.caption)
                     .padding(.top, 4)
+                    .opacity(resuming ? 0.3 : 1)
                     .help(resumable ? L("Resume in a new terminal") : L("Transcript no longer available"))
             }
             .foregroundStyle(.secondary)
@@ -657,7 +681,7 @@ private struct ClosedSessionRow: View {
         }
         .buttonStyle(.plain)
         .opacity(resumable ? 0.62 : 0.38)
-        .disabled(!resumable)
+        .disabled(!resumable || resuming)
         .contextMenu {
             Button(L("Remove from history"), role: .destructive, action: onForget)
         }
