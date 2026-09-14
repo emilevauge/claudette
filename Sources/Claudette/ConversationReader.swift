@@ -112,9 +112,15 @@ enum ConversationReader {
     /// the Ghostty title, so skipping the read for named sessions left them
     /// permanently unmatchable.
     static func aiTitle(for session: ClaudeSession) -> String? {
-        let path = transcriptPath(for: session)
+        aiTitle(cwd: session.cwd, sessionId: session.sessionId)
+    }
+
+    /// Same, addressed by `cwd` + `sessionId` instead of a live session, so
+    /// closed sessions kept in the history can be labelled too.
+    static func aiTitle(cwd: String, sessionId: String) -> String? {
+        let path = transcriptPath(cwd: cwd, sessionId: sessionId)
         let mtime = mtimeOf(path)
-        let cached = cache.value(for: session.sessionId)
+        let cached = cache.value(for: sessionId)
 
         if let cached, cached.mtime == mtime { return cached.title }
 
@@ -128,9 +134,105 @@ enum ConversationReader {
             ? nil
             : readAiTitle(from: path, maxWindow: cached?.title == nil ? 4 * 1024 * 1024 : 64 * 1024)
                 ?? cached?.title
-        cache.set(sessionId: session.sessionId, mtime: mtime, title: title)
+        cache.set(sessionId: sessionId, mtime: mtime, title: title)
         return title
     }
+
+    /// One-shot title read for a transcript that is no longer being written
+    /// (a closed session we are backfilling into the history). Bounded tail
+    /// window and no caching: the file won't change, and we may be looking at
+    /// a hundred of them in a row.
+    static func archivedAiTitle(cwd: String, sessionId: String,
+                                maxWindow: UInt64 = 256 * 1024) -> String? {
+        readAiTitle(from: transcriptPath(cwd: cwd, sessionId: sessionId),
+                    maxWindow: maxWindow)
+    }
+
+    /// What the head of a transcript tells us about a session that is over.
+    struct ArchivedTranscript {
+        /// Working directory. Required to resume: `claude --resume` has to run
+        /// in the session's own directory and the project slug isn't
+        /// invertible (it maps every non-alphanumeric character to `-`).
+        let cwd: String
+        /// Best label we can recover, `nil` when the session produced none.
+        let title: String?
+        /// Timestamp of the first entry, i.e. when the session really started.
+        let startedAt: Date?
+        /// `cli`, `claude-desktop`, `sdk-cli`, … as stamped on the user entries.
+        let entrypoint: String?
+    }
+
+    /// Read the first 64 KB of a transcript and pull out what identifies the
+    /// session. Claude Code stamps `cwd` and `entrypoint` on every user entry,
+    /// and the title entries (`custom-title`, `agent-name`, `ai-title`) are
+    /// emitted early, so the head of the file is enough.
+    ///
+    /// Title preference: the explicit `custom-title` the user set, then the
+    /// `agent-name`, then the first `ai-title`, then the first human prompt
+    /// condensed to one line. Sessions too short for any of those keep `nil`
+    /// and are shown by directory name alone.
+    static func archivedTranscript(at path: String) -> ArchivedTranscript? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 64 * 1024) else { return nil }
+
+        var cwd: String?
+        var customTitle: String?
+        var agentName: String?
+        var aiTitle: String?
+        var firstPrompt: String?
+        var startedAt: Date?
+        var entrypoint: String?
+
+        for line in data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true) {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else {
+                continue
+            }
+            if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
+            if entrypoint == nil, let e = obj["entrypoint"] as? String, !e.isEmpty { entrypoint = e }
+            if startedAt == nil, let ts = obj["timestamp"] as? String {
+                startedAt = iso8601.date(from: ts)
+            }
+
+            switch obj["type"] as? String {
+            case "custom-title":
+                if customTitle == nil { customTitle = obj["customTitle"] as? String }
+            case "agent-name":
+                if agentName == nil { agentName = obj["agentName"] as? String }
+            case "ai-title":
+                if aiTitle == nil { aiTitle = obj["aiTitle"] as? String }
+            case "user":
+                // First typed prompt, not a tool result or a sidechain turn.
+                if firstPrompt == nil,
+                   obj["isSidechain"] as? Bool != true,
+                   let message = obj["message"] as? [String: Any],
+                   let text = message["content"] as? String {
+                    // Slash commands arrive wrapped in `<command-name>` /
+                    // `<command-args>` markup: strip the tags, keep the words.
+                    let plain = text.replacingOccurrences(
+                        of: "<[^>]+>", with: " ", options: .regularExpression
+                    )
+                    let preview = notificationPreview(from: plain, maxLen: 80)
+                    if !preview.isEmpty { firstPrompt = preview }
+                }
+            default:
+                break
+            }
+        }
+
+        guard let cwd else { return nil }
+        let title = [customTitle, agentName, aiTitle, firstPrompt]
+            .compactMap { $0 }
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return ArchivedTranscript(cwd: cwd, title: title,
+                                  startedAt: startedAt, entrypoint: entrypoint)
+    }
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     /// True iff a background task (a subagent or a `Bash` with
     /// `run_in_background: true`) is currently writing output for this
@@ -326,8 +428,15 @@ enum ConversationReader {
     }
 
     private static func transcriptPath(for session: ClaudeSession) -> String {
-        let slug = projectSlug(for: session.cwd)
-        return "\(NSHomeDirectory())/.claude/projects/\(slug)/\(session.sessionId).jsonl"
+        transcriptPath(cwd: session.cwd, sessionId: session.sessionId)
+    }
+
+    /// Path of the JSONL transcript Claude Code writes for a session. Also
+    /// the existence test for "can this session still be resumed": `claude
+    /// --resume <id>` needs this file.
+    static func transcriptPath(cwd: String, sessionId: String) -> String {
+        let slug = projectSlug(for: cwd)
+        return "\(NSHomeDirectory())/.claude/projects/\(slug)/\(sessionId).jsonl"
     }
 
     private static func mtimeOf(_ path: String) -> TimeInterval? {

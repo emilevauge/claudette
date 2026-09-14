@@ -4,6 +4,11 @@ import KeyboardShortcuts
 struct SettingsView: View {
     @State private var launchAtLogin: Bool = LaunchAgent.isEnabled
 
+    /// Days a closed session stays in the list. `AppStorage` keeps the
+    /// stepper in sync with what `HistoryRetention` reads on the poll loop.
+    @AppStorage(HistoryRetention.defaultsKey)
+    private var retentionDays: Int = HistoryRetention.defaultDays
+
     /// Update,check state for the "About" section.
     @State private var updateChecking: Bool = false
     @State private var updateResult: UpdateChecker.ManualResult?
@@ -41,6 +46,25 @@ struct SettingsView: View {
                 Text(L("Startup"))
             } footer: {
                 Text(L("Automatically start Claudette when you log in."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Stepper(value: $retentionDays,
+                        in: HistoryRetention.range.lowerBound...HistoryRetention.range.upperBound) {
+                    HStack {
+                        Text(L("Keep closed sessions"))
+                        Spacer()
+                        Text(L("\(retentionDays) days"))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            } header: {
+                Text(L("History"))
+            } footer: {
+                Text(L("Closed sessions stay at the bottom of the list for this long, then are forgotten."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -39,3 +39,14 @@
 "%lld active subagents" = "%lld active subagents";
 "Enable remote control" = "Enable remote control";
 "Remote control active" = "Remote control active";
+"Closed" = "Closed";
+"Clear history" = "Clear history";
+"Remove from history" = "Remove from history";
+"Resume in a new terminal" = "Resume in a new terminal";
+"Transcript no longer available" = "Transcript no longer available";
+"History" = "History";
+"Keep closed sessions" = "Keep closed sessions";
+"%lld days" = "%lld days";
+"Closed sessions stay at the bottom of the list for this long, then are forgotten." = "Closed sessions stay at the bottom of the list for this long, then are forgotten.";
+
+"Closed %@" = "Closed %@";

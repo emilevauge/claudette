@@ -32,18 +32,25 @@ struct MenuView: View {
             selectedIndex = 0
             DispatchQueue.main.async { searchFocused = true }
         }
-        .onChange(of: filtered.count) {
-            selectedIndex = min(selectedIndex, max(filtered.count - 1, 0))
+        .onChange(of: rowCount) {
+            selectedIndex = min(selectedIndex, max(rowCount - 1, 0))
         }
     }
 
     // MARK: filtre
 
-    private var filtered: [ClaudeSession] {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return store.sessions }
+    private var searchTokens: [String] {
+        searchText
+            .trimmingCharacters(in: .whitespaces)
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+    }
 
-        let tokens = q.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    private var filtered: [ClaudeSession] {
+        let tokens = searchTokens
+        guard !tokens.isEmpty else { return store.sessions }
+
         return store.sessions.filter { s in
             let haystack = [
                 s.name ?? "",
@@ -56,6 +63,28 @@ struct MenuView: View {
             return tokens.allSatisfy { haystack.contains($0) }
         }
     }
+
+    /// Closed sessions matching the same query. Same list, same keyboard
+    /// navigation, just rendered greyed out below the live ones.
+    private var filteredHistory: [ClosedSession] {
+        let tokens = searchTokens
+        guard !tokens.isEmpty else { return store.history }
+
+        return store.history.filter { s in
+            let haystack = [
+                s.name ?? "",
+                s.aiTitle ?? "",
+                s.cwd,
+                URL(fileURLWithPath: s.cwd).lastPathComponent,
+                s.displayName
+            ].joined(separator: " ").lowercased()
+            return tokens.allSatisfy { haystack.contains($0) }
+        }
+    }
+
+    /// Number of selectable rows: live sessions then closed ones, in one
+    /// index space so ↑↓ walks the whole list.
+    private var rowCount: Int { filtered.count + filteredHistory.count }
 
     // MARK: header
 
@@ -77,8 +106,8 @@ struct MenuView: View {
                     return .handled
                 }
                 .onKeyPress(.downArrow) {
-                    if !filtered.isEmpty {
-                        selectedIndex = min(selectedIndex + 1, filtered.count - 1)
+                    if rowCount > 0 {
+                        selectedIndex = min(selectedIndex + 1, rowCount - 1)
                     }
                     return .handled
                 }
@@ -111,9 +140,9 @@ struct MenuView: View {
 
     @ViewBuilder
     private var content: some View {
-        if store.sessions.isEmpty {
+        if store.sessions.isEmpty && store.history.isEmpty {
             emptyState(L("No active Claude session"))
-        } else if filtered.isEmpty {
+        } else if rowCount == 0 {
             emptyState(L("No results for \"\(searchText)\""))
         } else {
             ScrollViewReader { proxy in
@@ -125,19 +154,56 @@ struct MenuView: View {
                                 selected: index == selectedIndex,
                                 onClick: { focus(session) }
                             )
-                            .id(session.id)
+                            .id(rowID(index))
+                        }
+
+                        if !filteredHistory.isEmpty {
+                            historyHeader
+                        }
+
+                        ForEach(Array(filteredHistory.enumerated()), id: \.element.id) { index, closed in
+                            let row = filtered.count + index
+                            ClosedSessionRow(
+                                session: closed,
+                                selected: row == selectedIndex,
+                                onClick: { resume(closed) },
+                                onForget: { store.forget(closed) }
+                            )
+                            .id(rowID(row))
                         }
                     }
                     .padding(.vertical, 4)
                 }
                 .frame(maxHeight: listMaxHeight)
                 .onChange(of: selectedIndex) { _, newIndex in
-                    guard filtered.indices.contains(newIndex) else { return }
+                    guard (0..<rowCount).contains(newIndex) else { return }
                     withAnimation(.easeInOut(duration: 0.1)) {
-                        proxy.scrollTo(filtered[newIndex].id, anchor: .center)
+                        proxy.scrollTo(rowID(newIndex), anchor: .center)
                     }
                 }
             }
+        }
+    }
+
+    /// Scroll anchor. Live and closed rows share one index space, and a
+    /// session id can appear in both lists for one poll (a session that just
+    /// exited), so the index is what makes the anchor unique.
+    private func rowID(_ index: Int) -> String { "row-\(index)" }
+
+    /// Separator introducing the closed sessions.
+    private var historyHeader: some View {
+        HStack(spacing: 6) {
+            Text(L("Closed"))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+            VStack { Divider() }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .contextMenu {
+            Button(L("Clear history")) { store.clearHistory() }
         }
     }
 
@@ -198,8 +264,20 @@ struct MenuView: View {
     // MARK: actions
 
     private func focusSelected() {
-        guard filtered.indices.contains(selectedIndex) else { return }
-        focus(filtered[selectedIndex])
+        if filtered.indices.contains(selectedIndex) {
+            focus(filtered[selectedIndex])
+            return
+        }
+        let historyIndex = selectedIndex - filtered.count
+        guard filteredHistory.indices.contains(historyIndex) else { return }
+        resume(filteredHistory[historyIndex])
+    }
+
+    /// Reopen a closed session in a new Ghostty window (`claude --resume`).
+    private func resume(_ closed: ClosedSession) {
+        guard closed.isResumable else { return }
+        AppDelegate.shared.closePopover()
+        SessionResumer.resume(closed)
     }
 
     private func focus(_ session: ClaudeSession) {
@@ -447,7 +525,26 @@ private struct SessionRow: View {
         }
     }
 
-    private func prettyPath(_ path: String) -> String {
+    private func prettyPath(_ path: String) -> String { RowFormat.prettyPath(path) }
+
+    /// Same as `prettyPath`, but returns a `Text` whose last path
+    /// component (the current directory's basename) is bold. So
+    /// `~/go/src/github.com/traefik/ingress-nginx-migration` reads as
+    /// `~/go/src/github.com/traefik/` + **`ingress-nginx-migration`**.
+    /// Lets the row's path catch the eye at a glance without growing
+    /// vertically, even when truncated from the head.
+    private func boldedPath(_ rawPath: String) -> Text { RowFormat.boldedPath(rawPath) }
+
+    /// Elapsed time since the session started: "2d 3h", "1h 23m", "12m".
+    private func sessionDuration(_ start: Date) -> String {
+        RowFormat.elapsed(since: start)
+    }
+}
+
+/// Formatting shared by the live and closed session rows.
+private enum RowFormat {
+
+    static func prettyPath(_ path: String) -> String {
         let home = NSHomeDirectory()
         if path.hasPrefix(home) {
             return "~" + path.dropFirst(home.count)
@@ -461,7 +558,7 @@ private struct SessionRow: View {
     /// `~/go/src/github.com/traefik/` + **`ingress-nginx-migration`**.
     /// Lets the row's path catch the eye at a glance without growing
     /// vertically, even when truncated from the head.
-    private func boldedPath(_ rawPath: String) -> Text {
+    static func boldedPath(_ rawPath: String) -> Text {
         let pretty = prettyPath(rawPath)
         guard let lastSlash = pretty.lastIndex(of: "/") else {
             return Text(pretty).bold()
@@ -472,10 +569,15 @@ private struct SessionRow: View {
         return Text(parent) + Text(basename).bold()
     }
 
-    /// Elapsed time since the session started: "2d 3h", "1h 23m", "12m".
-    private func sessionDuration(_ start: Date) -> String {
-        let interval = max(0, Date().timeIntervalSince(start))
-        return Self.durationFormatter.string(from: interval) ?? ""
+    /// Elapsed time since a date: "2d 3h", "1h 23m", "12m".
+    static func elapsed(since date: Date) -> String {
+        let interval = max(0, Date().timeIntervalSince(date))
+        return durationFormatter.string(from: interval) ?? ""
+    }
+
+    /// Absolute date and time, medium date + short time in the user's locale.
+    static func absolute(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .shortened)
     }
 
     /// Cached as a static (instantiating one is costly; this avoids creating
@@ -487,4 +589,89 @@ private struct SessionRow: View {
         f.maximumUnitCount = 2
         return f
     }()
+}
+
+/// A session that has exited, kept in the 7,day history. Same layout as a
+/// live row, dimmed throughout and with a grey dot instead of a phase color.
+/// Clicking it reopens the session in a new Ghostty window via
+/// `claude --resume`; a session whose transcript Claude Code has pruned can
+/// no longer be resumed, so its row is inert and says so.
+private struct ClosedSessionRow: View {
+    let session: ClosedSession
+    let selected: Bool
+    let onClick: () -> Void
+    let onForget: () -> Void
+
+    var body: some View {
+        let resumable = session.isResumable
+
+        Button(action: onClick) {
+            HStack(alignment: .top, spacing: 8) {
+                statusIndicator
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.displayName)
+                        .font(.system(.body, design: .default).weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if let aiTitle = session.aiTitle, !aiTitle.isEmpty {
+                        Text(aiTitle)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .help(aiTitle)
+                    }
+
+                    RowFormat.boldedPath(session.cwd)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+
+                    // No total,duration metric here, unlike a live row: a
+                    // transcript that has been resumed spans the whole time
+                    // between its first prompt and its last, which can be
+                    // weeks and says nothing about the session. When it
+                    // closed is what tells the user how long it will stay.
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock.arrow.circlepath")
+                        Text(RowFormat.elapsed(since: session.endedAt))
+                    }
+                    .font(.caption2)
+                    .help(L("Closed \(RowFormat.absolute(session.endedAt))"))
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: resumable ? "arrow.uturn.left" : "xmark.circle")
+                    .font(.caption)
+                    .padding(.top, 4)
+                    .help(resumable ? L("Resume in a new terminal") : L("Transcript no longer available"))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(resumable ? 0.62 : 0.38)
+        .disabled(!resumable)
+        .contextMenu {
+            Button(L("Remove from history"), role: .destructive, action: onForget)
+        }
+    }
+
+    private var statusIndicator: some View {
+        ZStack {
+            Circle()
+                .fill(Color.secondary.opacity(0.18))
+                .frame(width: 16, height: 16)
+
+            Image(systemName: "circle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
+    }
 }

@@ -28,6 +28,7 @@ open /Applications/Claudette.app
 - **Three-state activity dot** : orange pulses while Claude thinks, red pulses when it's blocked waiting on you (permission prompt or `AskUserQuestion`), steady green when idle.
 - **Rich rows** : LLM-generated `ai-title`, working directory, total duration, time since last activity, and a colored context-window fill bar (green → red) reading the live `used_percentage` from your status-line sidecar.
 - **One-click focus** : matches the session by `ai-title` and jumps to the exact Ghostty window, tab and split. Background agents launched from Claude Desktop are listed too and activate Claude.app on click.
+- **7-day history** : closed sessions stay in the list for a week, greyed out under the live ones. Click one to reopen it in a new Ghostty window with `claude --resume`. Seeded from the JSONL transcripts on disk, so sessions closed while Claudette wasn't running show up too.
 - **Instant search** : start typing as soon as the popover opens, multi-token filter on name, title and path. `↑↓` navigate, `↵` focus, `esc` close.
 - **Native notifications** : when Claude flips from thinking to waiting, with a preview of the last message; click to focus the terminal.
 - **One-click auto-update** : the update notification carries an `Update` action that downloads the DMG, swaps the bundle and relaunches Claudette.

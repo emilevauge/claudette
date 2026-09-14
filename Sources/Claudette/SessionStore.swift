@@ -8,12 +8,34 @@ import AppKit
 final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [ClaudeSession] = []
 
+    /// Sessions closed within the retention window (7 days by default, see
+    /// `HistoryRetention`), most recently
+    /// ended first. Rendered greyed out under the live ones; clicking one
+    /// reopens it with `claude --resume`.
+    @Published private(set) var history: [ClosedSession] = []
+
     /// Called every time a session transitions from busy to non-busy.
     var onSessionBecameIdle: ((ClaudeSession) -> Void)?
 
     private var timer: Timer?
     private let sessionsDir: String
     private let pollInterval: TimeInterval
+
+    /// Persistent archive of closed sessions.
+    private let historyStore = SessionHistoryStore()
+
+    /// Last live snapshot of each session, keyed by `sessionId`. Claude Code
+    /// usually leaves `~/.claude/sessions/<pid>.json` behind after the process
+    /// exits (so a dead PID is enough to detect the close), but it also prunes
+    /// those files eventually. Keeping the last snapshot lets us archive a
+    /// session whose JSON vanished outright between two polls.
+    private var lastSeenAlive: [String: ClaudeSession] = [:]
+
+    /// Retention the transcript backfill last ran for, in days. Zero until it
+    /// has run. Widening the window in the settings panel brings older
+    /// transcripts into range, so the backfill runs again; narrowing it only
+    /// needs the prune, which happens on every refresh.
+    private var backfilledForDays = 0
 
     /// Raw `status` field of each session at the previous refresh
     /// (sessionId → status). We trigger the "session became idle"
@@ -61,23 +83,54 @@ final class SessionStore: ObservableObject {
         }
 
         var alive: [ClaudeSession] = []
+        historyStore.prune()
+        var seenIds = Set<String>()
         for name in names where name.hasSuffix(".json") {
             let path = "\(sessionsDir)/\(name)"
-            guard var session = Self.parse(path: path), Self.isAlive(pid: session.pid) else {
-                continue
-            }
+            guard var session = Self.parse(path: path) else { continue }
             // Skip headless SDK invocations: `claude -p ...`, programmatic
             // subagents and any other non,interactive call. They write the
             // same session JSON as a real CLI session, so without this
             // filter we show a phantom "duplicate" row in the same cwd as
             // the real `cli` session that spawned them.
             if session.entrypoint == "sdk-cli" { continue }
+            seenIds.insert(session.sessionId)
+            // Dead PID: the session is over, archive the snapshot its JSON
+            // still holds.
+            guard Self.isAlive(pid: session.pid) else {
+                historyStore.record(session)
+                continue
+            }
             session.aiTitle = ConversationReader.aiTitle(for: session)
             session.contextFraction = ConversationReader.contextFraction(for: session)
             session.hasBackgroundWork = ConversationReader.hasBackgroundWork(for: session)
             session.activeSubagents = ConversationReader.activeSubagents(for: session)
             alive.append(session)
         }
+
+        // Sessions whose JSON disappeared since the last poll: archive the
+        // snapshot we still have in memory.
+        let aliveIds = Set(alive.map(\.sessionId))
+        for (id, snapshot) in lastSeenAlive where !seenIds.contains(id) {
+            historyStore.record(snapshot)
+        }
+        lastSeenAlive = alive.reduce(into: [String: ClaudeSession]()) { acc, s in
+            if !s.sessionId.isEmpty { acc[s.sessionId] = s }
+        }
+
+        // Seed the archive from the transcripts on disk, so sessions closed
+        // while Claudette wasn't running still show up. Runs on the first
+        // refresh, then again whenever the retention window is widened.
+        if HistoryRetention.days > backfilledForDays {
+            backfilledForDays = HistoryRetention.days
+            historyStore.backfillFromTranscripts(excluding: aliveIds)
+        }
+
+        // A session id can come back from the dead (`claude --resume` keeps
+        // it), so never show the same session in both lists.
+        let closed = historyStore.sorted.filter { !aliveIds.contains($0.sessionId) }
+        if closed != history { history = closed }
+        historyStore.flushIfNeeded()
 
         // Annotate with the matching Ghostty terminal: its title reflects the
         // real state of Claude (spinner glyph / ✳) in real time. Skip the
@@ -125,6 +178,20 @@ final class SessionStore: ObservableObject {
         hasBootstrapped = true
 
         sessions = alive
+    }
+
+    /// Drop one closed session from the history (user action).
+    func forget(_ closed: ClosedSession) {
+        historyStore.forget(sessionId: closed.sessionId)
+        historyStore.flushIfNeeded()
+        history.removeAll { $0.sessionId == closed.sessionId }
+    }
+
+    /// Drop the whole history (user action).
+    func clearHistory() {
+        historyStore.forgetAll()
+        historyStore.flushIfNeeded()
+        history = []
     }
 
     private func ghosttyIsRunning() -> Bool {
