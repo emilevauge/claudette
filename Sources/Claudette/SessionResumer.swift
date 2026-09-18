@@ -32,12 +32,25 @@ enum SessionResumer {
             activate
             set cfg to new surface configuration
             set initial working directory of cfg to "\(escape(cwd))"
-            set initial input of cfg to "claude --resume \(escape(sessionId))\\n"
+            set initial input of cfg to "\(resumeCommand(sessionId: sessionId))\\n"
             new window with configuration cfg
             return "ok"
         end tell
         """
         return GhosttyBridge.runScript(source) == "ok"
+    }
+
+    /// Command typed into the new terminal.
+    ///
+    /// `CLAUDE_CODE_CHILD_SESSION` marks a session started from inside
+    /// another one, and Claude Code turns session persistence off for those:
+    /// no state file, no transcript, so the resumed session would fall out of
+    /// the list and out of the history. Terminals inherit the marker from
+    /// whatever environment their terminal app was launched with, which we
+    /// don't control, so we clear it for the command we send rather than
+    /// hoping it is absent.
+    private static func resumeCommand(sessionId: String) -> String {
+        "env -u CLAUDE_CODE_CHILD_SESSION claude --resume \(escape(sessionId))"
     }
 
     /// Escape for an AppleScript string literal.
