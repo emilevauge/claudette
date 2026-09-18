@@ -51,3 +51,10 @@
 
 "Closed %@" = "Closed %@";
 "resuming…" = "resuming…";
+"Group by desktop" = "Group by desktop";
+"Session list" = "Session list";
+"Sort sessions under the macOS desktop their terminal window is on. Needs the Accessibility permission." = "Sort sessions under the macOS desktop their terminal window is on. Needs the Accessibility permission.";
+"Desktop %lld" = "Desktop %lld";
+"Screen %lld" = "Screen %lld";
+"Full screen" = "Full screen";
+"Other" = "Other";

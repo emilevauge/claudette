@@ -61,6 +61,12 @@ final class SessionStore: ObservableObject {
     /// First refresh: don't emit transitions on cold start.
     private var hasBootstrapped = false
 
+    /// WindowServer id of the Ghostty window each session was last seen in,
+    /// keyed by session id. See `annotateDesktops`: the Accessibility API
+    /// only lists the current space's windows, so this is what lets a session
+    /// keep its desktop while the user is looking at another one.
+    private var windowIDBySession: [String: CGWindowID] = [:]
+
     /// True while a refresh is running. `listTerminals()` can fall back to
     /// AppleScript, and a synchronous Apple Event pumps the run loop while it
     /// waits for the reply: the poll timer fires again *inside* that wait and
@@ -178,6 +184,9 @@ final class SessionStore: ObservableObject {
         if !terminals.isEmpty {
             alive = Self.annotate(alive, with: terminals)
         }
+        if DesktopGrouping.isEnabled, !alive.isEmpty {
+            alive = annotateDesktops(alive)
+        }
 
         // Sort: busy first, then most recently updated.
         alive.sort { a, b in
@@ -271,6 +280,7 @@ final class SessionStore: ObservableObject {
             claimed.insert(terminalIndex)
             result[sessionIndex].terminalTitle = terminals[terminalIndex].name
             result[sessionIndex].terminalId = terminals[terminalIndex].id
+            result[sessionIndex].terminalWindowID = terminals[terminalIndex].windowID
         }
 
         func firstUnclaimed(
@@ -315,6 +325,59 @@ final class SessionStore: ObservableObject {
             if let t = chosen { claim(i, t) }
         }
 
+        return result
+    }
+
+    /// Resolve the desktop of every session whose window we know.
+    ///
+    /// The window id comes from the Accessibility enumeration, which only
+    /// ever lists the windows of the *current* space: a session sitting on
+    /// another desktop is matched to no terminal at all this poll. The space
+    /// of a window id, on the other hand, reads fine from anywhere. So we
+    /// remember the id per session and keep querying it: a desktop is placed
+    /// exactly once its session's window has been seen (i.e. once the user
+    /// has been on that desktop while Claudette was running), and it stays
+    /// right afterwards, including when the window moves to another desktop.
+    ///
+    /// One WindowServer round-trip per distinct window, which is a handful:
+    /// several sessions usually share one Ghostty window (tabs and splits),
+    /// so each window is looked up once and reused. Sessions we have never
+    /// seen a window for keep `desktop == nil` and land in the "Other" group.
+    private func annotateDesktops(_ sessions: [ClaudeSession]) -> [ClaudeSession] {
+        var result = sessions
+
+        // Learn the window ids seen this poll, and fill in the ones we knew
+        // from a previous one.
+        for i in result.indices {
+            let id = result[i].terminalWindowID
+            if id != 0 {
+                windowIDBySession[result[i].id] = id
+            } else if let known = windowIDBySession[result[i].id] {
+                result[i].terminalWindowID = known
+            }
+        }
+        // Drop what belongs to sessions that are gone, so the map doesn't
+        // grow for the lifetime of the app.
+        let liveIDs = Set(result.map(\.id))
+        windowIDBySession = windowIDBySession.filter { liveIDs.contains($0.key) }
+
+        let windowIDs = Set(result.map(\.terminalWindowID)).subtracting([0])
+        guard !windowIDs.isEmpty, let layout = SpacesBridge.layout() else { return sessions }
+
+        let spaceByWindow = SpacesBridge.spaceIDs(
+            forWindows: Array(windowIDs),
+            activeSpaceIDs: layout.activeSpaceIDs
+        )
+
+        for i in result.indices {
+            guard let spaceID = spaceByWindow[result[i].terminalWindowID] else {
+                // The window is gone (closed) or reports no space (minimized):
+                // forget it rather than keep pointing at a dead id.
+                windowIDBySession[result[i].id] = nil
+                continue
+            }
+            result[i].desktop = layout.desktops[spaceID]
+        }
         return result
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// A Claude Code session detected on the local machine.
 struct ClaudeSession: Identifiable, Hashable {
@@ -53,6 +54,14 @@ struct ClaudeSession: Identifiable, Hashable {
     /// terminal title on every spinner tick.
     var terminalTitle: String?
     var terminalId: String?
+
+    /// WindowServer id of the matched Ghostty window, `0` when unknown
+    /// (Claude Desktop agent, no match, or Accessibility not granted).
+    var terminalWindowID: CGWindowID = 0
+
+    /// macOS Space the matched window sits on. `nil` when we couldn't
+    /// resolve it, which groups the session under "Other".
+    var desktop: SpacesBridge.Desktop?
 
     var id: String { sessionId.isEmpty ? "\(pid)" : sessionId }
 

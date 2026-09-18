@@ -21,6 +21,11 @@ enum GhosttyBridge {
         let id: String
         let cwd: String
         let name: String
+        /// WindowServer id of the window holding this terminal, `0` when
+        /// unknown. Only the Accessibility path can provide it (AppleScript
+        /// exposes Ghostty's own window id, which is unrelated), and it is
+        /// what `SpacesBridge` needs to tell which desktop the session is on.
+        var windowID: CGWindowID = 0
     }
 
     // MARK: public API
@@ -149,7 +154,10 @@ enum GhosttyBridge {
 
         return windows.compactMap { window in
             guard let title = axString(window, kAXTitleAttribute), !title.isEmpty else { return nil }
-            return GhosttyTerminal(id: "", cwd: "", name: title)
+            return GhosttyTerminal(
+                id: "", cwd: "", name: title,
+                windowID: SpacesBridge.windowID(of: window) ?? 0
+            )
         }
     }
 

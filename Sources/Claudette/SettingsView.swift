@@ -9,6 +9,11 @@ struct SettingsView: View {
     @AppStorage(HistoryRetention.defaultsKey)
     private var retentionDays: Int = HistoryRetention.defaultDays
 
+    /// Group the session list by macOS desktop. Headers only show up once
+    /// sessions actually sit on two different desktops.
+    @AppStorage(DesktopGrouping.defaultsKey)
+    private var groupByDesktop: Bool = true
+
     /// Update,check state for the "About" section.
     @State private var updateChecking: Bool = false
     @State private var updateResult: UpdateChecker.ManualResult?
@@ -46,6 +51,16 @@ struct SettingsView: View {
                 Text(L("Startup"))
             } footer: {
                 Text(L("Automatically start Claudette when you log in."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(L("Group by desktop"), isOn: $groupByDesktop)
+            } header: {
+                Text(L("Session list"))
+            } footer: {
+                Text(L("Sort sessions under the macOS desktop their terminal window is on. Needs the Accessibility permission."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

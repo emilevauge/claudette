@@ -82,6 +82,49 @@ struct MenuView: View {
         }
     }
 
+    /// Live sessions split by macOS desktop, in the order the rows are
+    /// rendered. One unlabelled section when grouping is off, or when every
+    /// session sits on the same desktop: a user with a single desktop should
+    /// never see a header appear.
+    private var sections: [SessionSection] {
+        let list = filtered
+        guard DesktopGrouping.isEnabled,
+              Set(list.map { $0.desktop?.spaceID }).count > 1 else {
+            return [SessionSection(id: "all", label: nil, rows: indexed(list, from: 0))]
+        }
+
+        let groups = Dictionary(grouping: list, by: { $0.desktop })
+        // Known desktops first, in WindowServer order; unmatched sessions last.
+        let keys = groups.keys.sorted { a, b in
+            switch (a, b) {
+            case let (a?, b?): return a.order < b.order
+            case (nil, _):     return false
+            case (_, nil):     return true
+            }
+        }
+
+        var offset = 0
+        return keys.map { key in
+            let rows = indexed(groups[key] ?? [], from: offset)
+            offset += rows.count
+            return SessionSection(
+                id: key.map { "desktop-\($0.spaceID)" } ?? "desktop-other",
+                label: key?.label ?? L("Other"),
+                rows: rows
+            )
+        }
+    }
+
+    private func indexed(_ sessions: [ClaudeSession], from offset: Int) -> [SessionRowItem] {
+        sessions.enumerated().map { SessionRowItem(index: offset + $0.offset, session: $0.element) }
+    }
+
+    /// Live sessions in render order. Grouping reorders them, and the
+    /// keyboard index space has to follow.
+    private var orderedSessions: [ClaudeSession] {
+        sections.flatMap { $0.rows.map(\.session) }
+    }
+
     /// Number of selectable rows: live sessions then closed ones, in one
     /// index space so ↑↓ walks the whole list.
     private var rowCount: Int { filtered.count + filteredHistory.count }
@@ -148,13 +191,18 @@ struct MenuView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(filtered.enumerated()), id: \.element.id) { index, session in
-                            SessionRow(
-                                session: session,
-                                selected: index == selectedIndex,
-                                onClick: { focus(session) }
-                            )
-                            .id("live-\(session.id)")
+                        ForEach(sections) { section in
+                            if let label = section.label {
+                                sectionHeader(label)
+                            }
+                            ForEach(section.rows) { row in
+                                SessionRow(
+                                    session: row.session,
+                                    selected: row.index == selectedIndex,
+                                    onClick: { focus(row.session) }
+                                )
+                                .id("live-\(row.session.id)")
+                            }
                         }
 
                         if !filteredHistory.isEmpty {
@@ -191,10 +239,25 @@ struct MenuView: View {
     /// by section: the two lists can hold the same id for one poll, when a
     /// session has just exited or just been resumed.
     private func anchor(for index: Int) -> String? {
-        if filtered.indices.contains(index) { return "live-\(filtered[index].id)" }
-        let historyIndex = index - filtered.count
+        let live = orderedSessions
+        if live.indices.contains(index) { return "live-\(live[index].id)" }
+        let historyIndex = index - live.count
         guard filteredHistory.indices.contains(historyIndex) else { return nil }
         return "closed-\(filteredHistory[historyIndex].id)"
+    }
+
+    /// Separator introducing one desktop's sessions.
+    private func sectionHeader(_ label: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+            VStack { Divider() }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
     }
 
     /// Separator introducing the closed sessions.
@@ -271,11 +334,12 @@ struct MenuView: View {
     // MARK: actions
 
     private func focusSelected() {
-        if filtered.indices.contains(selectedIndex) {
-            focus(filtered[selectedIndex])
+        let live = orderedSessions
+        if live.indices.contains(selectedIndex) {
+            focus(live[selectedIndex])
             return
         }
-        let historyIndex = selectedIndex - filtered.count
+        let historyIndex = selectedIndex - live.count
         guard filteredHistory.indices.contains(historyIndex) else { return }
         resume(filteredHistory[historyIndex])
     }
@@ -299,6 +363,21 @@ struct MenuView: View {
             _ = GhosttyBridge.focus(session: session, others: store.sessions)
         }
     }
+}
+
+/// One live session with its position in the flat keyboard index space.
+private struct SessionRowItem: Identifiable {
+    let index: Int
+    let session: ClaudeSession
+    var id: String { session.id }
+}
+
+/// A run of live sessions sharing a desktop, with the header to draw above
+/// them (`nil` when the list isn't grouped).
+private struct SessionSection: Identifiable {
+    let id: String
+    let label: String?
+    let rows: [SessionRowItem]
 }
 
 private struct SessionRow: View {

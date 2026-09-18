@@ -51,3 +51,10 @@
 
 "Closed %@" = "Cerrada el %@";
 "resuming…" = "reanudando…";
+"Group by desktop" = "Agrupar por escritorio";
+"Session list" = "Lista de sesiones";
+"Sort sessions under the macOS desktop their terminal window is on. Needs the Accessibility permission." = "Ordena las sesiones según el escritorio de macOS donde está su ventana de terminal. Requiere el permiso de accesibilidad.";
+"Desktop %lld" = "Escritorio %lld";
+"Screen %lld" = "Pantalla %lld";
+"Full screen" = "Pantalla completa";
+"Other" = "Otras";
