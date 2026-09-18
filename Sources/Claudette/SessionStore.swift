@@ -138,6 +138,30 @@ final class SessionStore: ObservableObject {
             alive.append(session)
         }
 
+        // Sessions running with persistence off publish no JSON, only their
+        // IPC key. Rebuild them from it (see `SessionKeys`) so the list shows
+        // them instead of looking empty. They carry no session id, so they
+        // never reach the history and never fire a notification; their phase
+        // rides the terminal title like any session with no `status` field.
+        let withJSON = Set(alive.map(\.pid))
+        for key in SessionKeys.scan(dir: sessionsDir) where !withJSON.contains(key.pid) {
+            guard Self.isAlive(pid: key.pid),
+                  let cwd = SessionKeys.cwd(ofPid: key.pid) else { continue }
+            alive.append(ClaudeSession(
+                pid: key.pid,
+                sessionId: "",
+                cwd: cwd,
+                startedAt: key.startedAt,
+                updatedAt: key.startedAt,
+                version: "",
+                status: "",
+                kind: "",
+                entrypoint: "cli",
+                name: nil,
+                bridgeSessionId: nil
+            ))
+        }
+
         // Sessions whose JSON disappeared since the last poll: archive the
         // snapshot we still have in memory.
         let aliveIds = Set(alive.map(\.sessionId))
