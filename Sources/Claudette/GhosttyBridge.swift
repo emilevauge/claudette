@@ -119,6 +119,15 @@ enum GhosttyBridge {
     private static let appleScriptPollInterval: TimeInterval = 6.0
     private static var appleScriptCache: (at: Date, terminals: [GhosttyTerminal])?
 
+    /// AppleScript enumeration behind the poll,rate cache. Unlike the
+    /// Accessibility one it carries each terminal's `id` and `working
+    /// directory`, which is the only way to match a session that publishes no
+    /// aiTitle (see `SessionKeys`). Rate,limited, so the caller can ask on
+    /// every poll and only pay an Apple Event every few seconds.
+    static func terminalsWithCwd() -> [GhosttyTerminal] {
+        cachedTerminalsViaAppleScript()
+    }
+
     private static func cachedTerminalsViaAppleScript() -> [GhosttyTerminal] {
         if let cached = appleScriptCache,
            Date().timeIntervalSince(cached.at) < appleScriptPollInterval {

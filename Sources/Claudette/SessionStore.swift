@@ -208,6 +208,29 @@ final class SessionStore: ObservableObject {
         if !terminals.isEmpty {
             alive = Self.annotate(alive, with: terminals)
         }
+
+        // A session with no aiTitle (one running with persistence off, or one
+        // Claude hasn't titled yet) can only be matched on the terminal's
+        // working directory, which the Accessibility enumeration doesn't
+        // carry. Pay for the AppleScript one (rate,limited) only when a
+        // session is still unmatched, and fold the window ids the AX pass
+        // found back in, joining on the title: same window, same title.
+        if alive.contains(where: { $0.terminalTitle == nil && !$0.isClaudeDesktop }),
+           ghosttyIsRunning() {
+            let withCwd = GhosttyBridge.terminalsWithCwd()
+            if !withCwd.isEmpty {
+                let windowIDByTitle = Dictionary(
+                    terminals.map { ($0.name, $0.windowID) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                alive = Self.annotate(alive, with: withCwd.map {
+                    GhosttyBridge.GhosttyTerminal(
+                        id: $0.id, cwd: $0.cwd, name: $0.name,
+                        windowID: windowIDByTitle[$0.name] ?? 0
+                    )
+                })
+            }
+        }
         if DesktopGrouping.isEnabled, !alive.isEmpty {
             alive = annotateDesktops(alive)
         }
