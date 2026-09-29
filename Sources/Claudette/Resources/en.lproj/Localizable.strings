@@ -58,3 +58,5 @@
 "Screen %lld" = "Screen %lld";
 "Full screen" = "Full screen";
 "Other" = "Other";
+"Place sessions on other desktops right away" = "Place sessions on other desktops right away";
+"Without Screen Recording, macOS hides the titles of windows on the other desktops: those sessions sit under \"Other\" until you visit their desktop once. Granting it places them immediately, and Claudette reads nothing but window titles." = "Without Screen Recording, macOS hides the titles of windows on the other desktops: those sessions sit under \"Other\" until you visit their desktop once. Granting it places them immediately, and Claudette reads nothing but window titles.";

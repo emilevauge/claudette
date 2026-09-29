@@ -58,3 +58,5 @@
 "Screen %lld" = "Pantalla %lld";
 "Full screen" = "Pantalla completa";
 "Other" = "Otras";
+"Place sessions on other desktops right away" = "Colocar de inmediato las sesiones de otros escritorios";
+"Without Screen Recording, macOS hides the titles of windows on the other desktops: those sessions sit under \"Other\" until you visit their desktop once. Granting it places them immediately, and Claudette reads nothing but window titles." = "Sin la grabación de pantalla, macOS oculta el título de las ventanas de los demás escritorios: esas sesiones quedan en «Otras» hasta que visites su escritorio una vez. Al concederla se colocan de inmediato, y Claudette no lee nada más que los títulos de ventana.";

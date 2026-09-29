@@ -14,6 +14,11 @@ struct SettingsView: View {
     @AppStorage(DesktopGrouping.defaultsKey)
     private var groupByDesktop: Bool = true
 
+    /// Read window titles (Screen Recording) so a session on another desktop
+    /// is placed on the first poll instead of waiting to be visited.
+    @AppStorage(DesktopGrouping.titlesDefaultsKey)
+    private var readsWindowTitles: Bool = false
+
     /// Update,check state for the "About" section.
     @State private var updateChecking: Bool = false
     @State private var updateResult: UpdateChecker.ManualResult?
@@ -57,10 +62,22 @@ struct SettingsView: View {
 
             Section {
                 Toggle(L("Group by desktop"), isOn: $groupByDesktop)
+
+                if groupByDesktop {
+                    Toggle(L("Place sessions on other desktops right away"), isOn: $readsWindowTitles)
+                        .onChange(of: readsWindowTitles) { _, newValue in
+                            guard newValue, !SpacesBridge.canReadWindowTitles else { return }
+                            SpacesBridge.requestWindowTitleAccess()
+                        }
+                }
             } header: {
                 Text(L("Session list"))
             } footer: {
                 Text(L("Sort sessions under the macOS desktop their terminal window is on. Needs the Accessibility permission."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                + Text(verbatim: "\n\n")
+                + Text(L("Without Screen Recording, macOS hides the titles of windows on the other desktops: those sessions sit under \"Other\" until you visit their desktop once. Granting it places them immediately, and Claudette reads nothing but window titles."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CoreGraphics
 import ApplicationServices
 
 /// Which macOS Space (what the UI calls a desktop) a window sits on.
@@ -104,6 +105,58 @@ enum SpacesBridge {
         return result
     }
 
+    /// Whether window titles are readable, i.e. whether the user granted
+    /// Screen Recording. macOS gates every window,title API behind it, the
+    /// private one included: without it `titledWindows` comes back empty and
+    /// the caller falls back to the per,session window id it learned from the
+    /// Accessibility pass.
+    static var canReadWindowTitles: Bool { CGPreflightScreenCaptureAccess() }
+
+    /// Surface the Screen Recording prompt. Returns whether access is already
+    /// granted; a fresh grant only takes effect for the next launch, which is
+    /// what macOS does for every app here.
+    @discardableResult
+    static func requestWindowTitleAccess() -> Bool {
+        CGRequestScreenCaptureAccess()
+    }
+
+    /// Every window of the given processes, with its title and the desktop it
+    /// sits on. Windows with no title (Ghostty's tab bar layers, offscreen
+    /// surfaces) are left out.
+    ///
+    /// This is what places a session sitting on another desktop right away:
+    /// the Accessibility enumeration lists the current space's windows and
+    /// nothing else, so without this the desktop is only learned once the
+    /// user walks over to it.
+    ///
+    /// Costs the Screen Recording permission, which is why the caller only
+    /// comes here when the user opted in (`DesktopGrouping.readsWindowTitles`).
+    /// macOS gates every window title behind it, `CGSCopyWindowProperty`
+    /// included: ungranted, the call succeeds and hands back empty strings,
+    /// hence the `title.isEmpty` filter doubling as the permission check.
+    static func titledWindows(ownedBy pids: [pid_t], layout: Layout) -> [(title: String, id: CGWindowID, desktop: Desktop?)] {
+        guard !pids.isEmpty, let conn = connection(), let copyProperty = copyWindowProperty else { return [] }
+
+        let infos = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
+        let ids: [CGWindowID] = infos.compactMap { info in
+            guard let pid = info[kCGWindowOwnerPID as String] as? pid_t, pids.contains(pid),
+                  // Layer 0 is a real window; Ghostty also publishes helper
+                  // layers we never want to match a session to.
+                  (info[kCGWindowLayer as String] as? Int) == 0,
+                  let id = info[kCGWindowNumber as String] as? CGWindowID else { return nil }
+            return id
+        }
+        guard !ids.isEmpty else { return [] }
+
+        let spaces = spaceIDs(forWindows: ids, activeSpaceIDs: layout.activeSpaceIDs)
+        return ids.compactMap { id in
+            var value: CFTypeRef?
+            guard copyProperty(conn, id, "kCGSWindowTitle" as CFString, &value) == 0,
+                  let title = value as? String, !title.isEmpty else { return nil }
+            return (title, id, spaces[id].flatMap { layout.desktops[$0] })
+        }
+    }
+
     /// `CGWindowID` behind an accessibility window element.
     ///
     /// The public AX API deliberately hides it, and the documented way round
@@ -122,6 +175,8 @@ enum SpacesBridge {
     private typealias MainConnectionIDFn = @convention(c) () -> Int32
     private typealias CopySpacesForWindowsFn = @convention(c) (Int32, Int32, CFArray) -> CFArray?
     private typealias CopyManagedDisplaySpacesFn = @convention(c) (Int32) -> CFArray?
+    private typealias CopyWindowPropertyFn =
+        @convention(c) (Int32, CGWindowID, CFString, UnsafeMutablePointer<CFTypeRef?>) -> Int32
     private typealias GetWindowFn =
         @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
 
@@ -137,6 +192,8 @@ enum SpacesBridge {
         symbol("CGSCopySpacesForWindows", in: skyLight)
     private static let copyManagedDisplaySpaces: CopyManagedDisplaySpacesFn? =
         symbol("CGSCopyManagedDisplaySpaces", in: skyLight)
+    private static let copyWindowProperty: CopyWindowPropertyFn? =
+        symbol("CGSCopyWindowProperty", in: skyLight)
     private static let axGetWindow: GetWindowFn? =
         symbol("_AXUIElementGetWindow", in: applicationServices)
 
@@ -173,5 +230,16 @@ enum DesktopGrouping {
             return UserDefaults.standard.bool(forKey: defaultsKey)
         }
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
+    }
+
+    /// Opt,in: read window titles (Screen Recording) so a session sitting on
+    /// another desktop is placed right away instead of waiting for the user
+    /// to walk over to it. Off by default: the grouping works without it, it
+    /// just fills in as the user moves around.
+    static let titlesDefaultsKey = "desktopGroupingReadsWindowTitles"
+
+    static var readsWindowTitles: Bool {
+        get { UserDefaults.standard.bool(forKey: titlesDefaultsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: titlesDefaultsKey) }
     }
 }

@@ -62,9 +62,11 @@ final class SessionStore: ObservableObject {
     private var hasBootstrapped = false
 
     /// WindowServer id of the Ghostty window each session was last seen in,
-    /// keyed by session id. See `annotateDesktops`: the Accessibility API
-    /// only lists the current space's windows, so this is what lets a session
-    /// keep its desktop while the user is looking at another one.
+    /// keyed by session id. The Accessibility enumeration only lists the
+    /// current space's windows, so without this a session keeps its desktop
+    /// only while the user is looking at it. Unused when window titles are
+    /// readable (see `annotateDesktops`), which answers for every space at
+    /// once.
     private var windowIDBySession: [String: CGWindowID] = [:]
 
     /// True while a refresh is running. `listTerminals()` can fall back to
@@ -88,6 +90,12 @@ final class SessionStore: ObservableObject {
         // of an Apple Event round-trip ; until then we transparently fall
         // back to AppleScript.
         GhosttyBridge.ensureAccessibilityPermission(prompt: true)
+        // Same idea for the opt,in window,title read: the user asked for it
+        // in the settings, so surface the Screen Recording prompt here rather
+        // than silently falling back to the slower, visit,driven path.
+        if DesktopGrouping.readsWindowTitles, !SpacesBridge.canReadWindowTitles {
+            SpacesBridge.requestWindowTitleAccess()
+        }
         refresh()
         let t = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -375,26 +383,25 @@ final class SessionStore: ObservableObject {
         return result
     }
 
-    /// Resolve the desktop of every session whose window we know.
+    /// Resolve the desktop of every session we matched to a terminal.
     ///
-    /// The window id comes from the Accessibility enumeration, which only
-    /// ever lists the windows of the *current* space: a session sitting on
-    /// another desktop is matched to no terminal at all this poll. The space
-    /// of a window id, on the other hand, reads fine from anywhere. So we
-    /// remember the id per session and keep querying it: a desktop is placed
-    /// exactly once its session's window has been seen (i.e. once the user
-    /// has been on that desktop while Claudette was running), and it stays
-    /// right afterwards, including when the window moves to another desktop.
+    /// Two ways in, depending on what the user granted:
     ///
-    /// One WindowServer round-trip per distinct window, which is a handful:
-    /// several sessions usually share one Ghostty window (tabs and splits),
-    /// so each window is looked up once and reused. Sessions we have never
-    /// seen a window for keep `desktop == nil` and land in the "Other" group.
+    ///   - Window titles readable (Screen Recording, opt,in): every Ghostty
+    ///     window on every space comes back with its title, so joining on the
+    ///     terminal title places each session on the first poll, wherever the
+    ///     user is looking.
+    ///   - Otherwise: the Accessibility pass only ever lists the current
+    ///     space's windows, so we remember the id per session and keep
+    ///     querying it. A session lands on its desktop once the user has been
+    ///     on that desktop while Claudette was running, and stays right
+    ///     afterwards, including when its window moves.
     private func annotateDesktops(_ sessions: [ClaudeSession]) -> [ClaudeSession] {
+        guard let layout = SpacesBridge.layout() else { return sessions }
         var result = sessions
 
-        // Learn the window ids seen this poll, and fill in the ones we knew
-        // from a previous one.
+        // Learn the window ids the Accessibility pass saw this poll, and fill
+        // in the ones a previous poll knew about.
         for i in result.indices {
             let id = result[i].terminalWindowID
             if id != 0 {
@@ -408,15 +415,35 @@ final class SessionStore: ObservableObject {
         let liveIDs = Set(result.map(\.id))
         windowIDBySession = windowIDBySession.filter { liveIDs.contains($0.key) }
 
-        let windowIDs = Set(result.map(\.terminalWindowID)).subtracting([0])
-        guard !windowIDs.isEmpty, let layout = SpacesBridge.layout() else { return sessions }
+        var byTitle: [String: (id: CGWindowID, desktop: SpacesBridge.Desktop?)] = [:]
+        if DesktopGrouping.readsWindowTitles, SpacesBridge.canReadWindowTitles {
+            let pids = NSWorkspace.shared.runningApplications
+                .filter { $0.bundleIdentifier == GhosttyBridge.bundleID }
+                .map(\.processIdentifier)
+            // Two windows can carry the same title (two shells in the same
+            // directory); first one wins, like every other match here.
+            for window in SpacesBridge.titledWindows(ownedBy: pids, layout: layout)
+            where byTitle[window.title] == nil {
+                byTitle[window.title] = (window.id, window.desktop)
+            }
+        }
 
-        let spaceByWindow = SpacesBridge.spaceIDs(
-            forWindows: Array(windowIDs),
-            activeSpaceIDs: layout.activeSpaceIDs
-        )
+        let windowIDs = Set(result.map(\.terminalWindowID)).subtracting([0])
+        var spaceByWindow: [CGWindowID: Int] = [:]
+        if !windowIDs.isEmpty {
+            spaceByWindow = SpacesBridge.spaceIDs(
+                forWindows: Array(windowIDs),
+                activeSpaceIDs: layout.activeSpaceIDs
+            )
+        }
 
         for i in result.indices {
+            if let title = result[i].terminalTitle, let hit = byTitle[title] {
+                result[i].terminalWindowID = hit.id
+                windowIDBySession[result[i].id] = hit.id
+                result[i].desktop = hit.desktop
+                continue
+            }
             guard let spaceID = spaceByWindow[result[i].terminalWindowID] else {
                 // The window is gone (closed) or reports no space (minimized):
                 // forget it rather than keep pointing at a dead id.
