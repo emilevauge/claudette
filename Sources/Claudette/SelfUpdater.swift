@@ -4,10 +4,11 @@ import AppKit
 /// Self,update flow triggered from the "Update" notification action.
 ///
 /// The app cannot rewrite its own bundle while running (binary is locked),
-/// so we stage a helper shell script in a tmp dir, spawn it detached, then
-/// terminate ourselves. The script waits for our PID to exit, mounts the
-/// DMG, replaces the bundle in place, strips the quarantine xattr, and
-/// relaunches Claudette.
+/// so we stage the helper shell script of `SelfUpdateScript` in a tmp dir,
+/// spawn it detached, then terminate ourselves. The script waits for our PID
+/// to exit, mounts the DMG, checks the new app's signature against ours,
+/// replaces the bundle in place, strips the quarantine xattr, and relaunches
+/// Claudette.
 @MainActor
 enum SelfUpdater {
 
@@ -17,6 +18,7 @@ enum SelfUpdater {
         case downloadFailed(Int?)
         case writeFailed
         case spawnFailed(Error)
+        case unsigned
 
         var description: String {
             switch self {
@@ -30,6 +32,8 @@ enum SelfUpdater {
                 return "could not stage the helper script"
             case .spawnFailed(let e):
                 return "helper spawn failed: \(e)"
+            case .unsigned:
+                return "this copy of Claudette is not signed with a certificate, so the update could not be verified"
             }
         }
     }
@@ -54,6 +58,9 @@ enum SelfUpdater {
         guard FileManager.default.isWritableFile(atPath: parent) else {
             throw UpdateError.bundleNotWritable
         }
+        guard let requirement = designatedRequirement() else {
+            throw UpdateError.unsigned
+        }
 
         // 2. Staging directory.
         let tmpDir = (NSTemporaryDirectory() as NSString)
@@ -72,59 +79,14 @@ enum SelfUpdater {
         )
 
         // 4. Write the helper script.
-        let mountPath = (tmpDir as NSString).appendingPathComponent("mount")
         let scriptPath = (tmpDir as NSString).appendingPathComponent("install.sh")
-        let logPath = (tmpDir as NSString).appendingPathComponent("install.log")
-        let pid = ProcessInfo.processInfo.processIdentifier
-        let backupPath = bundlePath + ".claudette-update-backup"
-        let script = """
-        #!/bin/zsh
-        set -eu
-        exec >\(shellQuote(logPath)) 2>&1
-
-        BUNDLE=\(shellQuote(bundlePath))
-        BACKUP=\(shellQuote(backupPath))
-        MOUNT=\(shellQuote(mountPath))
-        DMG=\(shellQuote(dmgPath))
-        TMP=\(shellQuote(tmpDir))
-
-        # Wait for Claudette (pid \(pid)) to exit, up to 10 s.
-        for _ in {1..100}; do
-            kill -0 \(pid) 2>/dev/null || break
-            sleep 0.1
-        done
-
-        mkdir -p "$MOUNT"
-        hdiutil attach -nobrowse -mountpoint "$MOUNT" "$DMG"
-
-        # Refuse to destroy the bundle if the DMG content is bad.
-        if [ ! -d "$MOUNT/Claudette.app" ]; then
-            hdiutil detach "$MOUNT" || true
-            echo "Bad DMG: missing Claudette.app inside" >&2
-            exit 1
-        fi
-
-        # Atomic,ish swap: move the old bundle aside, copy the new one in.
-        # If cp fails, restore from backup so the user is never appless.
-        rm -rf "$BACKUP"
-        mv "$BUNDLE" "$BACKUP"
-        if cp -R "$MOUNT/Claudette.app" "$BUNDLE"; then
-            rm -rf "$BACKUP"
-        else
-            rm -rf "$BUNDLE"
-            mv "$BACKUP" "$BUNDLE"
-            hdiutil detach "$MOUNT" || true
-            echo "cp failed, rolled back" >&2
-            exit 1
-        fi
-
-        # Some nested resource files are mode 444; xattr noisily fails on
-        # those even though the bundle root flag is what Gatekeeper checks.
-        xattr -dr com.apple.quarantine "$BUNDLE" 2>/dev/null || true
-        hdiutil detach "$MOUNT" || true
-        open "$BUNDLE"
-        rm -rf "$TMP"
-        """
+        let script = SelfUpdateScript.make(
+            bundlePath: bundlePath,
+            dmgPath: dmgPath,
+            workDir: tmpDir,
+            pid: ProcessInfo.processInfo.processIdentifier,
+            requirement: requirement
+        )
         do {
             try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
             guard chmod(scriptPath, 0o755) == 0 else { throw UpdateError.writeFailed }
@@ -152,10 +114,22 @@ enum SelfUpdater {
         NSApp.terminate(nil)
     }
 
-    /// POSIX shell single,quote escaping: wrap in '...', escape embedded
-    /// quotes by closing, escaping, and reopening.
-    private static func shellQuote(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    /// The running app's designated requirement: its bundle id and the
+    /// certificate it is signed with. Nil for an unsigned or ad hoc build,
+    /// which then cannot update itself.
+    static func designatedRequirement() -> String? {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        var requirement: SecRequirement?
+        var text: CFString?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopyDesignatedRequirement(staticCode, [], &requirement) == errSecSuccess, let requirement,
+              SecRequirementCopyString(requirement, [], &text) == errSecSuccess, let text
+        else { return nil }
+        let string = text as String
+        // Ad hoc signatures only pin their own hash: no update could match.
+        return string.contains("cdhash") ? nil : string
     }
 
     /// Surface an error via AppleScript `display notification` (no UN
